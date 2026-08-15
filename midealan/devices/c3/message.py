@@ -2,8 +2,8 @@
 
 from enum import IntEnum
 
-from midealan.const import DeviceType
-from midealan.message import (
+from midealocal.const import DeviceType
+from midealocal.message import (
     ListTypes,
     MessageBody,
     MessageRequest,
@@ -12,6 +12,8 @@ from midealan.message import (
 )
 
 TEMP_NEG_VALUE = 127
+ECO_FUNCTION_STATE_MASK = 0x01
+ECO_TIMER_STATE_MASK = 0x02
 
 
 class C3SilentLevel(IntEnum):
@@ -27,6 +29,95 @@ class C3DeviceMode(IntEnum):
 
     COOL = 2
     HEAT = 3
+
+
+class C3FanSpeed(IntEnum):
+    """C3 outdoor unit fan speed levels.
+
+    Values correspond to raw_byte * 10 (parser scales
+    ``body[data_offset + 3]`` by 10 to expose these values).
+    Exact naming for level 1..4 is not confirmed by any publicly
+    available documentation for the Galmet Prima 06 GT model - kept
+    generic until an authoritative source is available.
+    """
+
+    LEVEL_1 = 10
+    LEVEL_2 = 20
+    LEVEL_3 = 30
+    LEVEL_4 = 40
+
+
+class C3UnitRunMode(IntEnum):
+    """C3 unit actual running mode.
+
+    Reported via Modbus register 101 (V4.7):
+    ``0: off, 2: cooling, 3: heating``.
+    """
+
+    OFF = 0
+    COOL = 2
+    HEAT = 3
+
+
+# Error code lookup (source: official Modbus V4.7 documentation, table 1).
+# Format: raw_value -> (display_code, human_description).
+# NOTE: 4 codes (Hd, HE, L2, L8) have ambiguous descriptions in the source
+# PDF due to two-column layout extraction - kept as "unknown" until an
+# authoritative source is available.
+C3_ERROR_CODE_TABLE: dict[int, tuple[str, str]] = {
+    1: ("E0", "Water flow fault (E8 displayed 3 times)"),
+    2: ("E1", "Outlet water temp. sensor for Zone 2 (Tw2) fault"),
+    3: ("E2", "Communication fault between controller and hydraulic module"),
+    4: ("E3", "Final outlet water temp. sensor (T1) fault"),
+    5: ("E4", "Water tank temp. sensor (T5) fault"),
+    6: ("E5", "Condenser outlet refrigerant temp. sensor (T3) fault"),
+    7: ("E6", "Ambient temp. sensor (T4) fault"),
+    8: ("E7", "Buffer tank up temp. sensor (Tbt1) fault"),
+    9: ("E8", "Water flow failure"),
+    10: ("E9", "Suction temp. sensor (Th) fault"),
+    11: ("EA", "Discharge temp. sensor (Tp) fault"),
+    12: ("Eb", "Solar temp. sensor (Tsolar) fault"),
+    13: ("Ec", "Buffer tank low temp. sensor (Tbt2) fault"),
+    14: ("Ed", "Inlet water temp. sensor (Tw_in) malfunction"),
+    15: ("EE", "Hydraulic module EEPROM failure"),
+    20: ("P0", "Low pressure switch protection"),
+    21: ("P1", "High pressure switch protection"),
+    23: ("P3", "Compressor overcurrent protection"),
+    24: ("P4", "High discharge temperature protection"),
+    25: ("P5", "|Tw_out - Tw_in| value too big protection"),
+    26: ("P6", "Inverter module protection"),
+    31: ("Pb", "Anti-freeze mode"),
+    33: ("Pd", "High refrigerant outlet temp. protection of condenser"),
+    38: ("PP", "Tw_out - Tw_in unusual protection"),
+    39: ("H0", "Communication fault: hydraulic PCB B <-> main control PCB B"),
+    40: ("H1", "Communication fault: inverter PCB A <-> main control PCB B"),
+    41: ("H2", "Refrigerant liquid temp. sensor (T2) fault"),
+    42: ("H3", "Refrigerant gas temp. sensor (T2B) fault"),
+    43: ("H4", "Three times P6 (L0/L1) protection"),
+    44: ("H5", "Room temp. sensor (Ta) fault"),
+    45: ("H6", "DC fan motor fault"),
+    46: ("H7", "Voltage protection"),
+    47: ("H8", "Pressure sensor fault"),
+    48: ("H9", "Speed difference > 15Hz between front and back clock"),
+    49: ("HA", "Speed difference > 15Hz between real and setting speed"),
+    50: ("Hb", "3 times PP protection and Tw_out < 7C"),
+    52: ("Hd", "Unknown / description unclear in source document"),
+    53: ("HE", "Unknown / description unclear in source document"),
+    54: ("HF", "Inverter module board EEPROM fault"),
+    55: ("HH", "H6 displayed 10 times in 2 hours"),
+    57: ("HP", "Low pressure protection (Pe<0.6) occurred 3 times in 1 hour"),
+    65: ("C7", "Transducer module temperature too high protection"),
+    112: ("bH", "PED PCB fault"),
+    116: ("F1", "Low DC generatrix voltage protection"),
+    134: ("L0", "Module protection"),
+    135: ("L1", "DC generatrix low voltage protection"),
+    136: ("L2", "Unknown / description unclear in source document"),
+    138: ("L4", "MCE fault"),
+    139: ("L5", "Zero speed protection"),
+    141: ("L7", "Phase sequence fault / phase loss (3-phase only)"),
+    142: ("L8", "Unknown / description unclear in source document"),
+    143: ("L9", "Unknown / description unclear in source document"),
+}
 
 
 class MessageC3Base(MessageRequest):
@@ -306,9 +397,20 @@ class C3BasicBody(MessageBody):
         self.dhw_temp_min = float(body[data_offset + 20])
         self.tank_actual_temperature = float(body[data_offset + 21])
         self.error_code = body[data_offset + 22]
+        _code_info = C3_ERROR_CODE_TABLE.get(self.error_code)
+        if self.error_code == 0:
+            self.error_code_description = "No error"
+        elif _code_info:
+            self.error_code_description = f"{_code_info[0]}: {_code_info[1]}"
+        else:
+            self.error_code_description = f"Unknown code (raw={self.error_code})"
         self.tbh_control = body[data_offset + 23] & 0x80 > 0
         self.SysEnergyAnaEN = body[data_offset + 23] & 0x20 > 0
         self.HMIEnergyAnaSetEN = body[data_offset + 23] & 0x40 > 0
+        # snake_case aliases so device attributes can be exposed under
+        # canonical names via update_attributes_from_message()
+        self.sys_energy_ana_en = self.SysEnergyAnaEN
+        self.hmi_energy_ana_set_en = self.HMIEnergyAnaSetEN
 
 
 class C3EnergyBody(MessageBody):
@@ -350,6 +452,31 @@ class C3EnergyBody(MessageBody):
         self.zone2_temp_set = float(body[data_offset + 11])
         self.t5s = body[data_offset + 12]
         self.tas = body[data_offset + 13]
+        # WiFi module serial / model identifier is appended after the main
+        # payload as an ASCII block preceded by a run of dash ("-") padding
+        # bytes and terminated with NUL bytes. Layout observed on captured
+        # frames: bytes ~96..159 = dashes, ~160..191 = ASCII serial, then NUL.
+        # Search robustly (offsets may vary across firmware revisions).
+        self.wifi_module_serial: str | None = None
+        dash_run = b"-" * 20
+        dash_idx = body.find(dash_run, data_offset)
+        if dash_idx != -1:
+            tail = body[dash_idx:]
+            # skip the dash padding
+            start = 0
+            while start < len(tail) and tail[start:start + 1] == b"-":
+                start += 1
+            end = start
+            while end < len(tail) and tail[end] != 0:
+                end += 1
+            candidate = bytes(tail[start:end]).strip()
+            if candidate:
+                try:
+                    decoded = candidate.decode("ascii")
+                except UnicodeDecodeError:
+                    decoded = None
+                if decoded and decoded.isprintable():
+                    self.wifi_module_serial = decoded
 
 
 class C3SilenceBody(MessageBody):
@@ -385,8 +512,12 @@ class C3ECOBody(MessageBody):
     def __init__(self, body: bytearray, data_offset: int = 0) -> None:
         """Initialize C3 ECO message body."""
         super().__init__(body)
-        self.eco_function_state = body[data_offset] & 0x01 > 0
-        self.eco_timer_state = body[data_offset] & 0x02 > 0
+        self.eco_function_state = (
+            len(body) > data_offset and body[data_offset] & ECO_FUNCTION_STATE_MASK > 0
+        )
+        self.eco_timer_state = (
+            len(body) > data_offset and body[data_offset] & ECO_TIMER_STATE_MASK > 0
+        )
 
 
 class C3DisinfectBody(MessageBody):
@@ -409,8 +540,16 @@ class C3UnitParaBody(MessageBody):
         """Initialize C3 UnitPara message body."""
         super().__init__(body)
         self.comp_run_freq = body[data_offset]
-        self.unit_mode_run = body[data_offset + 1]
-        self.fan_speed = body[data_offset + 3] * 10
+        _umr_raw = body[data_offset + 1]
+        try:
+            self.unit_mode_run = C3UnitRunMode(_umr_raw).name.lower()
+        except ValueError:
+            self.unit_mode_run = _umr_raw
+        _fs_raw = body[data_offset + 3] * 10
+        try:
+            self.fan_speed = C3FanSpeed(_fs_raw).name.lower()
+        except ValueError:
+            self.fan_speed = _fs_raw
         self.fg_capacity_need = body[data_offset + 5]
         self.temp_t3 = body[data_offset + 6]
         self.temp_t4 = body[data_offset + 7]
@@ -424,6 +563,8 @@ class C3UnitParaBody(MessageBody):
         # self.odu_comp_current  body[data_offset + 16]
         self.odu_voltage = body[data_offset + 17] * 256 + body[data_offset + 18]
         self.exv_current = body[data_offset + 19] * 256 + body[data_offset + 20]
+        # canonical name matching Modbus documentation (EXV valve opening)
+        self.exv_opening = self.exv_current
         self.odu_model = body[data_offset + 21]
         # self.unit_online_num  body[data_offset + 22]
         # self.current_code  body[data_offset + 23]
@@ -446,6 +587,8 @@ class C3UnitParaBody(MessageBody):
         self.idu_t1s1 = body[data_offset + 52]
         self.idu_t1s2 = body[data_offset + 53]
         self.water_flower = body[data_offset + 54] * 256 + body[data_offset + 55]
+        # canonical (typo-corrected) alias
+        self.water_flow = self.water_flower
         self.odu_plan_vol_lmt = body[data_offset + 56]
         self.current_unit_capacity = body[data_offset + 57]
         self.sphera_ahs_voltage = body[data_offset + 59]
