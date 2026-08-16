@@ -638,6 +638,33 @@ class C3UnitParaBody(MessageBody):
         self.total_renew_power0 = ((body[data_offset + 86] << 8) + body[data_offset + 87]) / 100
 
 
+
+class C3UnitParaExtBody(MessageBody):
+    """C3 extended UnitPara/runtime notification body.
+
+    Sent asynchronously by the device (notify1 + body_type X05, 239 B).
+    Overlaps with X10 for most telemetry (temps, pressures, instant power,
+    total electricity/thermal counters) - those fields are intentionally
+    NOT re-exposed to avoid duplicate entities. Only fields unique to
+    this frame are parsed here.
+
+    Layout verified against wired HMI (Galmet Prima 06 GT, 2026-08-16 log):
+    - offset 57-58 (u16 BE): compressor total run time in hours (2356 h)
+    - other counters at 50, 55-56, 59-60 are candidates for future
+      decoding (need more samples over time).
+    """
+
+    def __init__(self, body: bytearray, data_offset: int = 0) -> None:
+        """Initialize C3 UnitParaExt (long X05 notify) message body."""
+        super().__init__(body)
+        # Compressor total run time (hours). Verified against wired HMI.
+        # data_offset=1 skips body_type; absolute frame offsets are 57-58,
+        # so relative to data_offset we read + 56 and + 57.
+        self.comp_total_run_time = (
+            body[data_offset + 56] * 256 + body[data_offset + 57]
+        )
+
+
 class MessageC3Response(MessageResponse):
     """C3 message response."""
 
@@ -654,6 +681,12 @@ class MessageC3Response(MessageResponse):
             self.message_type == MessageType.notify1 and self.body_type == ListTypes.X04
         ):
             self.set_body(C3EnergyBody(super().body, data_offset=1))
+        elif (
+            self.message_type == MessageType.notify1
+            and self.body_type == ListTypes.X05
+        ):
+            # Long (239 B) notify1 frame with extra runtime counters.
+            self.set_body(C3UnitParaExtBody(super().body, data_offset=1))
         elif self.message_type == MessageType.query and self.body_type == ListTypes.X05:
             self.set_body(C3SilenceBody(super().body, data_offset=1))
         elif self.body_type == ListTypes.X07:
