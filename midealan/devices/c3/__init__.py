@@ -143,7 +143,6 @@ class DeviceAttributes(StrEnum):
     fg_capacity_need = "fg_capacity_need"
     fg_usb_info_connect = "fg_usb_info_connect"
     temp_t4a_ver = "temp_t4a_ver"
-    temp_tf = "temp_tf"
     t5s = "t5s"
     tas = "tas"
     idu_t1s1 = "idu_t1s1"
