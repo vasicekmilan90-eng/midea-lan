@@ -122,6 +122,10 @@ class DeviceAttributes(StrEnum):
     exv_opening = "exv_opening"
     odu_voltage = "odu_voltage"
     dc_current = "dc_current"
+    # Aug-16 pump-test correlation additions
+    dc_bus_voltage = "dc_bus_voltage"
+    compressor_current = "compressor_current"
+    instant_power = "instant_power"
     room_rel_hum = "room_rel_hum"
     # Energy totals from UnitPara body
     # Compressor total run time (hours) - from long X05 notify1 frame
@@ -138,6 +142,10 @@ class DeviceAttributes(StrEnum):
     current_unit_capacity = "current_unit_capacity"
     hydbox_subtype = "hydbox_subtype"
     hydrobox_capacity = "hydrobox_capacity"
+    # IDU / ODU firmware versions (from X10 telemetry, bytes 94/95).
+    # Verified against wired HMI: IDU=V14, ODU=V64.
+    idu_software_version = "idu_software_version"
+    odu_software_version = "odu_software_version"
     machine_type = "machine_type"
     odu_model = "odu_model"
     odu_plan_vol_lmt = "odu_plan_vol_lmt"
@@ -263,6 +271,9 @@ class MideaC3Device(MideaDevice):
                 DeviceAttributes.exv_opening: None,
                 DeviceAttributes.odu_voltage: None,
                 DeviceAttributes.dc_current: None,
+                DeviceAttributes.dc_bus_voltage: None,
+                DeviceAttributes.compressor_current: None,
+                DeviceAttributes.instant_power: None,
                 DeviceAttributes.room_rel_hum: None,
                 DeviceAttributes.comp_total_run_time: None,
                 DeviceAttributes.total_electricity0: None,
@@ -275,6 +286,8 @@ class MideaC3Device(MideaDevice):
                 DeviceAttributes.current_unit_capacity: None,
                 DeviceAttributes.hydbox_subtype: None,
                 DeviceAttributes.hydrobox_capacity: None,
+                DeviceAttributes.idu_software_version: None,
+                DeviceAttributes.odu_software_version: None,
                 DeviceAttributes.machine_type: None,
                 DeviceAttributes.odu_model: None,
                 DeviceAttributes.odu_plan_vol_lmt: None,
