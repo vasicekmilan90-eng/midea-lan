@@ -434,18 +434,17 @@ class C3EnergyBody(MessageBody):
         # bit4
         self.status_ibh = (status_byte & 0x10) > 0
         # total_energy_consumption
+        # Verified against wired-unit spreadsheet (2026-08-16):
+        # total_electricity=14599 kWh appears as u16 BE at raw offset 4
+        # (data_offset=1 → +3), NOT the u40 shift. Same for total_thermal.
+        # Bytes 1-2 stayed 0 across all captures; the 40-bit shift produced
+        # spurious ~9e8 readings.
         self.total_energy_consumption = (
-            (body[data_offset + 1] << 32)
-            + (body[data_offset + 2] << 16)
-            + (body[data_offset + 3] << 8)
-            + (body[data_offset + 4])
+            (body[data_offset + 3] << 8) + body[data_offset + 4]
         )
-        # total_produced_energy
+        # total_produced_energy (thermal counter, kWh) - u16 BE at offset 8
         self.total_produced_energy = (
-            (body[data_offset + 5] << 32)
-            + (body[data_offset + 6] << 16)
-            + (body[data_offset + 7] << 8)
-            + (body[data_offset + 8])
+            (body[data_offset + 7] << 8) + body[data_offset + 8]
         )
         base_value = body[data_offset + 9]
         self.outdoor_temperature = float(
@@ -559,7 +558,11 @@ class C3UnitParaBody(MessageBody):
         self.temp_tp = body[data_offset + 8]
         self.temp_tw_in = body[data_offset + 9]
         self.temp_tw_out = body[data_offset + 10]
-        self.temp_tsolar = body[data_offset + 11]
+        # Sensor sentinel: raw byte 127 (0x7F) is the C3 firmware convention
+        # for "sensor not connected / not available". Convert to None so HA
+        # can render the entity as unavailable instead of showing 127 °C.
+        _tsolar = body[data_offset + 11]
+        self.temp_tsolar = None if _tsolar == 127 else _tsolar
         self.hydbox_subtype = body[data_offset + 12]
         self.fg_usb_info_connect = body[data_offset + 13]
         # self.usb_index_max  body[data_offset + 14]
@@ -577,8 +580,12 @@ class C3UnitParaBody(MessageBody):
         self.temp_t2b = body[data_offset + 36]
         self.temp_t5 = body[data_offset + 37]
         self.temp_ta = body[data_offset + 38]
-        self.temp_tb_t1 = body[data_offset + 39]
-        self.temp_tb_t2 = body[data_offset + 40]
+        # Buffer tank sensors: 127 = "sensor not connected" (verified against
+        # user's installation with no buffer-tank probes wired).
+        _tbt1 = body[data_offset + 39]
+        _tbt2 = body[data_offset + 40]
+        self.temp_tb_t1 = None if _tbt1 == 127 else _tbt1
+        self.temp_tb_t2 = None if _tbt2 == 127 else _tbt2
         self.hydrobox_capacity = body[data_offset + 41]
         self.pressure_high = body[data_offset + 42] * 256 + body[data_offset + 43]
         self.pressure_low = body[data_offset + 44] * 256 + body[data_offset + 45]
@@ -603,29 +610,24 @@ class C3UnitParaBody(MessageBody):
         # NOTE: pwm_pump_out removed - previous code shared offset 63 with
         # room_rel_hum which is clearly wrong. Actual offset unknown; entity
         # is unregistered until an authoritative source is available.
+        # Verified against wired-unit spreadsheet (2026-08-16 09:57 snapshot):
+        # total_electricity=14599 kWh at raw byte offset 69 → u16 BE at data_offset+68.
+        # Values are 16-bit big-endian, unit = kWh. The previous 40-bit shift
+        # produced spurious ~1.6e9 readings; correct decode is u16 BE.
         self.total_electricity0 = (
-            (body[data_offset + 66] << 32)
-            + (body[data_offset + 67] << 16)
-            + (body[data_offset + 68] << 8)
-            + (body[data_offset + 69])
+            (body[data_offset + 68] << 8) + body[data_offset + 69]
         )
+        # total_thermal=10867 kWh at raw byte offset 73 → u16 BE at data_offset+72
         self.total_thermal0 = (
-            (body[data_offset + 70] << 32)
-            + (body[data_offset + 71] << 16)
-            + (body[data_offset + 72] << 8)
-            + (body[data_offset + 73])
+            (body[data_offset + 72] << 8) + body[data_offset + 73]
         )
+        # heat_elec_total_consum=5834 kWh at raw byte offset 77 → data_offset+76
         self.heat_elec_total_consum0 = (
-            (body[data_offset + 74] << 32)
-            + (body[data_offset + 75] << 16)
-            + (body[data_offset + 76] << 8)
-            + (body[data_offset + 77])
+            (body[data_offset + 76] << 8) + body[data_offset + 77]
         )
+        # heat_elec_total_capacity mirrors thermal (10867 kWh) at data_offset+80
         self.heat_elec_total_capacity0 = (
-            (body[data_offset + 78] << 32)
-            + (body[data_offset + 79] << 16)
-            + (body[data_offset + 80] << 8)
-            + (body[data_offset + 81])
+            (body[data_offset + 80] << 8) + body[data_offset + 81]
         )
         # raw uint16 in 0.01 kW units -> divide by 100 for kW
         # (verified against wired HMI: raw 209 -> 2.09 kW)
@@ -636,6 +638,39 @@ class C3UnitParaBody(MessageBody):
         # Best-effort correction: use the next uint16 at offset 86-87.
         # Confirm against wired HMI once a non-zero PV production sample exists.
         self.total_renew_power0 = ((body[data_offset + 86] << 8) + body[data_offset + 87]) / 100
+        # ------------------------------------------------------------------
+        # IDU / ODU software versions (Modbus reg 130 / reg 1042 mapped
+        # into X10 telemetry frame). Verified against wired HMI:
+        #   raw byte offset 94 = IDU sw version = 14  (HMI shows "V14")
+        #   raw byte offset 95 = ODU sw version = 64  (HMI shows "V64")
+        # HMI software version ("V56A" on wired display) is NOT present in
+        # X10 / X04 / long-X05 payloads - the C3 telemetry frames only
+        # expose IDU + ODU firmware. Left unimplemented until an
+        # authoritative source is available.
+        self.idu_software_version = body[data_offset + 93]
+        self.odu_software_version = body[data_offset + 94]
+        # ------------------------------------------------------------------
+        # WiFi module serial: appended as ASCII after a run of "-" padding.
+        # Verified: bytes 160..191 = "0000C3310171H120F24114100123MNJ2".
+        self.wifi_module_serial: str | None = None
+        dash_run = b"-" * 20
+        dash_idx = body.find(dash_run, data_offset)
+        if dash_idx != -1:
+            tail = body[dash_idx:]
+            start = 0
+            while start < len(tail) and tail[start:start + 1] == b"-":
+                start += 1
+            end = start
+            while end < len(tail) and tail[end] != 0:
+                end += 1
+            candidate = bytes(tail[start:end]).strip()
+            if candidate:
+                try:
+                    decoded = candidate.decode("ascii")
+                except UnicodeDecodeError:
+                    decoded = None
+                if decoded and decoded.isprintable():
+                    self.wifi_module_serial = decoded
 
 
 
