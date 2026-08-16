@@ -124,6 +124,8 @@ class DeviceAttributes(StrEnum):
     dc_current = "dc_current"
     room_rel_hum = "room_rel_hum"
     # Energy totals from UnitPara body
+    # Compressor total run time (hours) - from long X05 notify1 frame
+    comp_total_run_time = "comp_total_run_time"
     total_electricity0 = "total_electricity0"
     total_thermal0 = "total_thermal0"
     heat_elec_total_consum0 = "heat_elec_total_consum0"
@@ -262,6 +264,7 @@ class MideaC3Device(MideaDevice):
                 DeviceAttributes.odu_voltage: None,
                 DeviceAttributes.dc_current: None,
                 DeviceAttributes.room_rel_hum: None,
+                DeviceAttributes.comp_total_run_time: None,
                 DeviceAttributes.total_electricity0: None,
                 DeviceAttributes.total_thermal0: None,
                 DeviceAttributes.heat_elec_total_consum0: None,
