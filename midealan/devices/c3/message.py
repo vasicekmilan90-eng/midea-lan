@@ -41,6 +41,9 @@ class C3FanSpeed(IntEnum):
     generic until an authoritative source is available.
     """
 
+    # OFF added after field verification against wired HMI:
+    # compressor idle -> raw byte 0 (which fell back to LEVEL_2).
+    OFF = 0
     LEVEL_1 = 10
     LEVEL_2 = 20
     LEVEL_3 = 30
@@ -582,20 +585,24 @@ class C3UnitParaBody(MessageBody):
         self.temp_th = body[data_offset + 46]
         self.machine_type = body[data_offset + 47]
         self.odu_target_fre = body[data_offset + 48]
-        self.dc_current = body[data_offset + 49]
+        # raw byte in deci-amps -> divide by 10 for A (verified against wired HMI)
+        self.dc_current = body[data_offset + 49] / 10
         self.temp_tf = body[data_offset + 51]
         self.idu_t1s1 = body[data_offset + 52]
         self.idu_t1s2 = body[data_offset + 53]
-        self.water_flower = body[data_offset + 54] * 256 + body[data_offset + 55]
-        # canonical (typo-corrected) alias
-        self.water_flow = self.water_flower
+        # raw uint16 in 0.01 m3/h units -> divide by 100 for m3/h
+        # (verified against wired HMI: raw 53 -> 0.53 m3/h)
+        _wf_raw = body[data_offset + 54] * 256 + body[data_offset + 55]
+        self.water_flow = _wf_raw / 100
         self.odu_plan_vol_lmt = body[data_offset + 56]
         self.current_unit_capacity = body[data_offset + 57]
         self.sphera_ahs_voltage = body[data_offset + 59]
         self.temp_t4a_ver = body[data_offset + 60]
         self.water_pressure = body[data_offset + 61] * 256 + body[data_offset + 62]
         self.room_rel_hum = body[data_offset + 63]
-        self.pwm_pump_out = body[data_offset + 63]
+        # NOTE: pwm_pump_out removed - previous code shared offset 63 with
+        # room_rel_hum which is clearly wrong. Actual offset unknown; entity
+        # is unregistered until an authoritative source is available.
         self.total_electricity0 = (
             (body[data_offset + 66] << 32)
             + (body[data_offset + 67] << 16)
@@ -620,13 +627,15 @@ class C3UnitParaBody(MessageBody):
             + (body[data_offset + 80] << 8)
             + (body[data_offset + 81])
         )
-        self.instant_power0 = (body[data_offset + 82] << 8) + (body[data_offset + 83])
-        self.instant_renew_power0 = (body[data_offset + 84] << 8) + (
-            body[data_offset + 85]
-        )
-        self.total_renew_power0 = (body[data_offset + 84] << 8) + (
-            body[data_offset + 85]
-        )
+        # raw uint16 in 0.01 kW units -> divide by 100 for kW
+        # (verified against wired HMI: raw 209 -> 2.09 kW)
+        self.instant_power0 = ((body[data_offset + 82] << 8) + body[data_offset + 83]) / 100
+        # scaled to kW (0.01 kW units) for consistency with instant_power0
+        self.instant_renew_power0 = ((body[data_offset + 84] << 8) + body[data_offset + 85]) / 100
+        # TODO: previous version aliased this to instant_renew_power0 bytes.
+        # Best-effort correction: use the next uint16 at offset 86-87.
+        # Confirm against wired HMI once a non-zero PV production sample exists.
+        self.total_renew_power0 = ((body[data_offset + 86] << 8) + body[data_offset + 87]) / 100
 
 
 class MessageC3Response(MessageResponse):
