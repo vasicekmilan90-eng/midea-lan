@@ -126,6 +126,16 @@ class DeviceAttributes(StrEnum):
     dc_bus_voltage = "dc_bus_voltage"
     compressor_current = "compressor_current"
     instant_power = "instant_power"
+    # LOAD_OUTPUT bitmap decoded flags (X10 byte[33]) - Aug-16 pump test
+    load_output_raw = "load_output_raw"
+    load_output_tbh = "load_output_tbh"
+    pump_i_running = "pump_i_running"
+    pump_o_running = "pump_o_running"
+    pump_d_running = "pump_d_running"
+    pump_c_running = "pump_c_running"
+    pump_s_running = "pump_s_running"
+    sv1_open = "sv1_open"
+    sv2_open = "sv2_open"
     room_rel_hum = "room_rel_hum"
     # Energy totals from UnitPara body
     # Compressor total run time (hours) - from long X05 notify1 frame
@@ -274,6 +284,15 @@ class MideaC3Device(MideaDevice):
                 DeviceAttributes.dc_bus_voltage: None,
                 DeviceAttributes.compressor_current: None,
                 DeviceAttributes.instant_power: None,
+                DeviceAttributes.load_output_raw: None,
+                DeviceAttributes.load_output_tbh: None,
+                DeviceAttributes.pump_i_running: None,
+                DeviceAttributes.pump_o_running: None,
+                DeviceAttributes.pump_d_running: None,
+                DeviceAttributes.pump_c_running: None,
+                DeviceAttributes.pump_s_running: None,
+                DeviceAttributes.sv1_open: None,
+                DeviceAttributes.sv2_open: None,
                 DeviceAttributes.room_rel_hum: None,
                 DeviceAttributes.comp_total_run_time: None,
                 DeviceAttributes.total_electricity0: None,
