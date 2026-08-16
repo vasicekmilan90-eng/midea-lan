@@ -150,7 +150,6 @@ class DeviceAttributes(StrEnum):
     zone1_temp_set = "zone1_temp_set"
     zone2_temp_set = "zone2_temp_set"
     zone_terminal_type = "zone_terminal_type"
-    pwm_pump_out = "pwm_pump_out"
     sphera_ahs_voltage = "sphera_ahs_voltage"
     disinfect_set_weekday = "disinfect_set_weekday"
     disinfect_start_hour = "disinfect_start_hour"
@@ -288,7 +287,6 @@ class MideaC3Device(MideaDevice):
                 DeviceAttributes.zone1_temp_set: None,
                 DeviceAttributes.zone2_temp_set: None,
                 DeviceAttributes.zone_terminal_type: None,
-                DeviceAttributes.pwm_pump_out: None,
                 DeviceAttributes.sphera_ahs_voltage: None,
                 DeviceAttributes.disinfect_set_weekday: None,
                 DeviceAttributes.disinfect_start_hour: None,
