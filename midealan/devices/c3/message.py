@@ -547,12 +547,17 @@ class C3UnitParaBody(MessageBody):
             self.unit_mode_run = C3UnitRunMode(_umr_raw).name.lower()
         except ValueError:
             self.unit_mode_run = _umr_raw
-        _fs_raw = body[data_offset + 3] * 10
+        # NOTE: correlation vs wired HMI (Aug-16 pump test) shows fan RPM is
+        # located at body[data_offset + 2] * 10 (not +3). Kept +3 as legacy
+        # attribute name for backward compat.
+        _fs_raw = body[data_offset + 2] * 10
         try:
             self.fan_speed = C3FanSpeed(_fs_raw).name.lower()
         except ValueError:
             self.fan_speed = _fs_raw
         self.fg_capacity_need = body[data_offset + 5]
+        # Compressor current in A (verified against wired HMI Aug-16, raw=A)
+        self.compressor_current = body[data_offset + 4]
         self.temp_t3 = body[data_offset + 6]
         self.temp_t4 = body[data_offset + 7]
         self.temp_tp = body[data_offset + 8]
@@ -590,10 +595,33 @@ class C3UnitParaBody(MessageBody):
         self.pressure_high = body[data_offset + 42] * 256 + body[data_offset + 43]
         self.pressure_low = body[data_offset + 44] * 256 + body[data_offset + 45]
         self.temp_th = body[data_offset + 46]
+        # LOAD_OUTPUT bitmap at body[data_offset + 32] (data[33] in raw frame).
+        # Bit-mapping validated against wired HMI (Aug-16 pump-run test):
+        #   b2 = Backup heater (TBH)      -> load_output_tbh
+        #   b3 = Water pump interior      -> pump_i
+        #   b4 = SV1 (3-way DHW valve)    -> sv1
+        #   b5 = SV2 (heating valve)      -> sv2
+        #   b6 = Water pump outdoor       -> pump_o
+        #   b7 = Water pump D             -> pump_d
+        # b0/b1 (Pump_C, Pump_S, SV3, gas boiler) were never active in the
+        # reference test; bit assignment for them is tentative.
+        _load = body[data_offset + 32]
+        self.load_output_raw   = _load
+        self.pump_c_running    = bool(_load & 0x01)
+        self.pump_s_running    = bool(_load & 0x02)
+        self.load_output_tbh   = bool(_load & 0x04)
+        self.pump_i_running    = bool(_load & 0x08)
+        self.sv1_open          = bool(_load & 0x10)
+        self.sv2_open          = bool(_load & 0x20)
+        self.pump_o_running    = bool(_load & 0x40)
+        self.pump_d_running    = bool(_load & 0x80)
         self.machine_type = body[data_offset + 47]
         self.odu_target_fre = body[data_offset + 48]
-        # raw byte in deci-amps -> divide by 10 for A (verified against wired HMI)
-        self.dc_current = body[data_offset + 49] / 10
+        # DC current in A. Correlation vs wired HMI (Aug-16 test):
+        #   raw=3 -> 3 A ; raw=4 -> 4 A ; raw=5 -> 5 A. Unit is A (no scaling).
+        self.dc_current = body[data_offset + 49]
+        # DC-bus voltage in V. Correlation vs wired HMI: raw 33->330V, 37->370V.
+        self.dc_bus_voltage = body[data_offset + 50] * 10
         self.temp_tf = body[data_offset + 51]
         self.idu_t1s1 = body[data_offset + 52]
         self.idu_t1s2 = body[data_offset + 53]
@@ -602,7 +630,14 @@ class C3UnitParaBody(MessageBody):
         _wf_raw = body[data_offset + 54] * 256 + body[data_offset + 55]
         self.water_flow = _wf_raw / 100
         self.odu_plan_vol_lmt = body[data_offset + 56]
-        self.current_unit_capacity = body[data_offset + 57]
+        # Instant power in kW (u16 BE /100). Correlation vs wired HMI (Aug-16):
+        #   idle 0.00-2.13 kW ; run peak 4.24 kW. Overrides earlier X10-energy
+        #   frozen sample at bytes 82..83 (that offset carries the last energy
+        #   commit, not the instantaneous reading).
+        self.instant_power = ((body[data_offset + 57] << 8) + body[data_offset + 58]) / 100
+        # keep current_unit_capacity attribute (moved to a different offset if needed)
+        # setting to None here as the previous mapping was incorrect.
+        self.current_unit_capacity = None
         self.sphera_ahs_voltage = body[data_offset + 59]
         self.temp_t4a_ver = body[data_offset + 60]
         self.water_pressure = body[data_offset + 61] * 256 + body[data_offset + 62]
