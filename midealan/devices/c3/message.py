@@ -571,7 +571,9 @@ class C3UnitParaBody(MessageBody):
         self.hydbox_subtype = body[data_offset + 12]
         self.fg_usb_info_connect = body[data_offset + 13]
         # self.usb_index_max  body[data_offset + 14]
-        # self.odu_comp_current  body[data_offset + 16]
+        # ODU compressor current in A (raw b[17]). Verified against wired HMI
+        # 2026-08-18: raw 0 while compressor idle, raw 3 when compressor runs.
+        self.odu_comp_current = body[data_offset + 16]
         self.odu_voltage = body[data_offset + 17] * 256 + body[data_offset + 18]
         self.exv_current = body[data_offset + 19] * 256 + body[data_offset + 20]
         # canonical name matching Modbus documentation (EXV valve opening)
@@ -606,15 +608,35 @@ class C3UnitParaBody(MessageBody):
         # b0/b1 (Pump_C, Pump_S, SV3, gas boiler) were never active in the
         # reference test; bit assignment for them is tentative.
         _load = body[data_offset + 32]
-        self.load_output_raw   = _load
-        self.pump_c_running    = bool(_load & 0x01)
-        self.pump_s_running    = bool(_load & 0x02)
-        self.load_output_tbh   = bool(_load & 0x04)
-        self.pump_i_running    = bool(_load & 0x08)
-        self.sv1_open          = bool(_load & 0x10)
-        self.sv2_open          = bool(_load & 0x20)
-        self.pump_o_running    = bool(_load & 0x40)
-        self.pump_d_running    = bool(_load & 0x80)
+        # --- Reg 129 (Load output) — 16-bit ---
+        # Low byte at raw b[33] (parser body[data_offset+32])
+        # High byte at raw b[32] (parser body[data_offset+31])
+        # Mapping strictly per Midea Modbus doc reg 40130.
+        _load_hi = body[data_offset + 31]
+        self.load_output_raw     = _load
+        self.load_output_raw_hi  = _load_hi
+        self.load_output_reg129  = (_load_hi << 8) | _load
+        # --- low byte ---
+        self.ibh1_on             = bool(_load & 0x01)
+        self.ibh2_on             = bool(_load & 0x02)
+        self.load_output_tbh     = bool(_load & 0x04)
+        self.pump_i_running      = bool(_load & 0x08)
+        self.sv1_open            = bool(_load & 0x10)
+        self.sv2_open            = bool(_load & 0x20)
+        self.pump_o_running      = bool(_load & 0x40)
+        self.pump_d_running      = bool(_load & 0x80)
+        # --- high byte (tentative offset b[32]; all-zero in verified arch) ---
+        self.pump_c_running      = bool(_load_hi & 0x01)  # BIT8
+        self.sv3_open            = bool(_load_hi & 0x02)  # BIT9
+        self.crankcase_heater_on = bool(_load_hi & 0x04)  # BIT10
+        self.pump_s_running      = bool(_load_hi & 0x08)  # BIT11
+        self.alarm_on            = bool(_load_hi & 0x10)  # BIT12
+        self.aux_heat_on         = bool(_load_hi & 0x40)  # BIT14
+        # Compressor running flag: bit 5 of raw b[32] (body[data_offset+31]).
+        # Verified against wired HMI (Aug-18): comp_run_freq>0 iff (raw & 0x20).
+        _cmp = body[data_offset + 31]
+        self.compressor_status_raw = _cmp
+        self.compressor_on = bool(_cmp & 0x20)
         self.machine_type = body[data_offset + 47]
         self.odu_target_fre = body[data_offset + 48]
         # DC current in A. Correlation vs wired HMI (Aug-16 test):
@@ -706,6 +728,53 @@ class C3UnitParaBody(MessageBody):
                     decoded = None
                 if decoded and decoded.isprintable():
                     self.wifi_module_serial = decoded
+
+        # ------------------------------------------------------------------
+        # IDU / ODU software version strings (with build date).
+        # The wired HMI shows firmware as e.g. "V14 24-11-41" — numeric part
+        # is already exposed as idu_software_version / odu_software_version
+        # (integers). Build date is embedded inside the ASCII tail after the
+        # H/F markers, e.g. "...H120F24114100123MNJ2".
+        # Layout observed:
+        #   H<idu_ver 3 digits> F<odu_ver 2 digits> <date YYMMDDx>
+        # We parse it best-effort; on any mismatch we fall back to the plain
+        # numeric "V<n>" string so the entity is always populated.
+        self.idu_software_version_str: str | None = None
+        self.odu_software_version_str: str | None = None
+        # Numeric byte values at b[94]/b[95] match the wired HMI display
+        # ("V14" / "V64"). The build-date encoding is NOT present in the
+        # current C3 telemetry frames (verified across all captured logs
+        # + Aug-18 archive). We therefore expose two safe strings:
+        #   idu_software_version_str = "V<n>"  (matches HMI exactly)
+        #   odu_software_version_str = "V<n>"
+        # Plus a diagnostic "build_info" attribute carrying the printable
+        # ASCII tail (contains H<xxx>F<xx><digits> factory identifiers).
+        try:
+            self.idu_software_version_str = f"V{int(self.idu_software_version)}"
+        except Exception:
+            self.idu_software_version_str = None
+        try:
+            self.odu_software_version_str = f"V{int(self.odu_software_version)}"
+        except Exception:
+            self.odu_software_version_str = None
+        # Optional: parse a plausible build date embedded in the tail
+        # ("H<idu>F<odu><YYMMDD>..."). We DO NOT overwrite the version
+        # strings with it, only append when it looks valid (YY 20-30, MM 01-12,
+        # DD 01-31).
+        self.build_info = self.wifi_module_serial
+        try:
+            import re as _re
+            m = _re.search(r"H\d{2,3}F\d{2}(\d{2})(\d{2})(\d{2})", self.wifi_module_serial or "")
+            if m:
+                yy, mm, dd = (int(x) for x in m.groups())
+                if 20 <= yy <= 40 and 1 <= mm <= 12 and 1 <= dd <= 31:
+                    date_fmt = f"20{yy:02d}-{mm:02d}-{dd:02d}"
+                    if self.idu_software_version_str:
+                        self.idu_software_version_str = f"{self.idu_software_version_str} ({date_fmt})"
+                    if self.odu_software_version_str:
+                        self.odu_software_version_str = f"{self.odu_software_version_str} ({date_fmt})"
+        except Exception:
+            pass
 
 
 
