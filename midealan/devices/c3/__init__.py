@@ -39,10 +39,6 @@ class DeviceAttributes(StrEnum):
     disinfect = "disinfect"
     fast_dhw = "fast_dhw"
     zone_temp_type = "zone_temp_type"
-    zone1_room_temp_mode = "zone1_room_temp_mode"
-    zone2_room_temp_mode = "zone2_room_temp_mode"
-    zone1_water_temp_mode = "zone1_water_temp_mode"
-    zone2_water_temp_mode = "zone2_water_temp_mode"
     mode = "mode"
     mode_auto = "mode_auto"
     zone_target_temp = "zone_target_temp"
@@ -57,9 +53,6 @@ class DeviceAttributes(StrEnum):
     room_temp_min = "room_temp_min"
     dhw_temp_max = "dhw_temp_max"
     dhw_temp_min = "dhw_temp_min"
-    target_temperature = "target_temperature"
-    temperature_max = "temperature_max"
-    temperature_min = "temperature_min"
     status_heating = "status_heating"
     status_dhw = "status_dhw"
     status_tbh = "status_tbh"
@@ -69,7 +62,6 @@ class DeviceAttributes(StrEnum):
     outdoor_temperature = "outdoor_temperature"
     temp_tw_in = "temp_tw_in"
     temp_tw_out = "temp_tw_out"
-    instant_power0 = "instant_power0"
     silent_mode = "silent_mode"
     silent_level = "silent_level"
     eco_mode = "eco_mode"
@@ -124,10 +116,17 @@ class DeviceAttributes(StrEnum):
     dc_current = "dc_current"
     # Aug-16 pump-test correlation additions
     dc_bus_voltage = "dc_bus_voltage"
-    compressor_current = "compressor_current"
     instant_power = "instant_power"
     # LOAD_OUTPUT bitmap decoded flags (X10 byte[33]) - Aug-16 pump test
     load_output_raw = "load_output_raw"
+    load_output_raw_hi = "load_output_raw_hi"
+    load_output_reg129 = "load_output_reg129"
+    ibh1_on = "ibh1_on"
+    ibh2_on = "ibh2_on"
+    sv3_open = "sv3_open"
+    crankcase_heater_on = "crankcase_heater_on"
+    alarm_on = "alarm_on"
+    aux_heat_on = "aux_heat_on"
     load_output_tbh = "load_output_tbh"
     pump_i_running = "pump_i_running"
     pump_o_running = "pump_o_running"
@@ -140,37 +139,33 @@ class DeviceAttributes(StrEnum):
     # Energy totals from UnitPara body
     # Compressor total run time (hours) - from long X05 notify1 frame
     comp_total_run_time = "comp_total_run_time"
-    total_electricity0 = "total_electricity0"
-    total_thermal0 = "total_thermal0"
-    heat_elec_total_consum0 = "heat_elec_total_consum0"
-    heat_elec_total_capacity0 = "heat_elec_total_capacity0"
-    instant_renew_power0 = "instant_renew_power0"
-    total_renew_power0 = "total_renew_power0"
     # WiFi module identifier (parsed from tail of energy frame)
     wifi_module_serial = "wifi_module_serial"
     # --- Additional low-level diagnostic attributes exposed 1:1 from parser ---
-    current_unit_capacity = "current_unit_capacity"
     hydbox_subtype = "hydbox_subtype"
     hydrobox_capacity = "hydrobox_capacity"
     # IDU / ODU firmware versions (from X10 telemetry, bytes 94/95).
     # Verified against wired HMI: IDU=V14, ODU=V64.
-    idu_software_version = "idu_software_version"
-    odu_software_version = "odu_software_version"
+    # String form with build date parsed from the X10 ASCII tail
+    # (e.g. "V14 24-11-41"). Falls back to plain "V<n>" when the date
+    # cannot be located.
+    idu_software_version_str = "idu_software_version_str"
+    odu_software_version_str = "odu_software_version_str"
+    # Compressor telemetry (Aug-18 verification).
+    compressor_on = "compressor_on"
+    compressor_status_raw = "compressor_status_raw"
+    odu_comp_current = "odu_comp_current"
+    # ASCII tail from X10 payload (factory identifier + build code)
     machine_type = "machine_type"
     odu_model = "odu_model"
-    odu_plan_vol_lmt = "odu_plan_vol_lmt"
     odu_target_fre = "odu_target_fre"
     fg_capacity_need = "fg_capacity_need"
-    fg_usb_info_connect = "fg_usb_info_connect"
-    temp_t4a_ver = "temp_t4a_ver"
     t5s = "t5s"
     tas = "tas"
     idu_t1s1 = "idu_t1s1"
     idu_t1s2 = "idu_t1s2"
     zone1_temp_set = "zone1_temp_set"
     zone2_temp_set = "zone2_temp_set"
-    zone_terminal_type = "zone_terminal_type"
-    sphera_ahs_voltage = "sphera_ahs_voltage"
     disinfect_set_weekday = "disinfect_set_weekday"
     disinfect_start_hour = "disinfect_start_hour"
     disinfect_start_minutes = "disinfect_start_minutes"
@@ -238,7 +233,6 @@ class MideaC3Device(MideaDevice):
                 DeviceAttributes.outdoor_temperature: None,
                 DeviceAttributes.temp_tw_in: None,
                 DeviceAttributes.temp_tw_out: None,
-                DeviceAttributes.instant_power0: None,
                 DeviceAttributes.error_code: 0,
                 DeviceAttributes.error_code_description: "No error",
                 DeviceAttributes.heat: False,
@@ -282,9 +276,16 @@ class MideaC3Device(MideaDevice):
                 DeviceAttributes.odu_voltage: None,
                 DeviceAttributes.dc_current: None,
                 DeviceAttributes.dc_bus_voltage: None,
-                DeviceAttributes.compressor_current: None,
                 DeviceAttributes.instant_power: None,
                 DeviceAttributes.load_output_raw: None,
+                DeviceAttributes.load_output_raw_hi: None,
+                DeviceAttributes.load_output_reg129: None,
+                DeviceAttributes.ibh1_on: None,
+                DeviceAttributes.ibh2_on: None,
+                DeviceAttributes.sv3_open: None,
+                DeviceAttributes.crankcase_heater_on: None,
+                DeviceAttributes.alarm_on: None,
+                DeviceAttributes.aux_heat_on: None,
                 DeviceAttributes.load_output_tbh: None,
                 DeviceAttributes.pump_i_running: None,
                 DeviceAttributes.pump_o_running: None,
@@ -295,25 +296,18 @@ class MideaC3Device(MideaDevice):
                 DeviceAttributes.sv2_open: None,
                 DeviceAttributes.room_rel_hum: None,
                 DeviceAttributes.comp_total_run_time: None,
-                DeviceAttributes.total_electricity0: None,
-                DeviceAttributes.total_thermal0: None,
-                DeviceAttributes.heat_elec_total_consum0: None,
-                DeviceAttributes.heat_elec_total_capacity0: None,
-                DeviceAttributes.instant_renew_power0: None,
-                DeviceAttributes.total_renew_power0: None,
                 DeviceAttributes.wifi_module_serial: None,
-                DeviceAttributes.current_unit_capacity: None,
                 DeviceAttributes.hydbox_subtype: None,
                 DeviceAttributes.hydrobox_capacity: None,
-                DeviceAttributes.idu_software_version: None,
-                DeviceAttributes.odu_software_version: None,
+                DeviceAttributes.idu_software_version_str: None,
+                DeviceAttributes.odu_software_version_str: None,
+                DeviceAttributes.compressor_on: None,
+                DeviceAttributes.compressor_status_raw: None,
+                DeviceAttributes.odu_comp_current: None,
                 DeviceAttributes.machine_type: None,
                 DeviceAttributes.odu_model: None,
-                DeviceAttributes.odu_plan_vol_lmt: None,
                 DeviceAttributes.odu_target_fre: None,
                 DeviceAttributes.fg_capacity_need: None,
-                DeviceAttributes.fg_usb_info_connect: None,
-                DeviceAttributes.temp_t4a_ver: None,
                 DeviceAttributes.temp_tf: None,
                 DeviceAttributes.t5s: None,
                 DeviceAttributes.tas: None,
@@ -321,8 +315,6 @@ class MideaC3Device(MideaDevice):
                 DeviceAttributes.idu_t1s2: None,
                 DeviceAttributes.zone1_temp_set: None,
                 DeviceAttributes.zone2_temp_set: None,
-                DeviceAttributes.zone_terminal_type: None,
-                DeviceAttributes.sphera_ahs_voltage: None,
                 DeviceAttributes.disinfect_set_weekday: None,
                 DeviceAttributes.disinfect_start_hour: None,
                 DeviceAttributes.disinfect_start_minutes: None,
