@@ -142,6 +142,27 @@ class DeviceAttributes(StrEnum):
     pump_s_running = "pump_s_running"
     sv1_open = "sv1_open"
     sv2_open = "sv2_open"
+    # Diagnostic raw uint8 exposures — LAN offset candidates for Modbus
+    # reg 128 (Status bit 1) whose exact position is not yet known.
+    # Users can correlate these against scenario events (defrost, alarm,
+    # DHW anti-freeze, etc.) to pin down bit assignments.
+    raw_b18 = "raw_b18"
+    raw_b19 = "raw_b19"
+    raw_b20 = "raw_b20"
+    raw_b21 = "raw_b21"
+    raw_b31 = "raw_b31"
+    raw_b56 = "raw_b56"
+    raw_b57 = "raw_b57"
+    raw_b58 = "raw_b58"
+    raw_b59 = "raw_b59"
+    raw_b74 = "raw_b74"
+    raw_b83 = "raw_b83"
+    raw_b85 = "raw_b85"
+    # System-active flag (candidate for Modbus reg 128 BIT0 — compressor/
+    # system-running status bit). Derived from body[58] in X10 telemetry.
+    # Verified 100% correlation with comp_run_freq>0 and instant_power>0
+    # over 229 X10 frames (2026-08-18 HA log).
+    system_active_reg128 = "system_active_reg128"
     room_rel_hum = "room_rel_hum"
     # Energy totals from UnitPara body
     # Compressor total run time (hours) - from long X05 notify1 frame
@@ -301,6 +322,19 @@ class MideaC3Device(MideaDevice):
                 DeviceAttributes.pump_s_running: None,
                 DeviceAttributes.sv1_open: None,
                 DeviceAttributes.sv2_open: None,
+                DeviceAttributes.raw_b18: None,
+                DeviceAttributes.raw_b19: None,
+                DeviceAttributes.raw_b20: None,
+                DeviceAttributes.raw_b21: None,
+                DeviceAttributes.raw_b31: None,
+                DeviceAttributes.raw_b56: None,
+                DeviceAttributes.raw_b57: None,
+                DeviceAttributes.raw_b58: None,
+                DeviceAttributes.raw_b59: None,
+                DeviceAttributes.raw_b74: None,
+                DeviceAttributes.raw_b83: None,
+                DeviceAttributes.raw_b85: None,
+                DeviceAttributes.system_active_reg128: None,
                 DeviceAttributes.room_rel_hum: None,
                 DeviceAttributes.comp_total_run_time: None,
                 DeviceAttributes.wifi_module_serial: None,
