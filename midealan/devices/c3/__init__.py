@@ -65,6 +65,13 @@ class DeviceAttributes(StrEnum):
     silent_mode = "silent_mode"
     silent_level = "silent_level"
     eco_mode = "eco_mode"
+    zone1_room_temp_mode = "zone1_room_temp_mode"
+    zone2_room_temp_mode = "zone2_room_temp_mode"
+    zone1_water_temp_mode = "zone1_water_temp_mode"
+    zone2_water_temp_mode = "zone2_water_temp_mode"
+    target_temperature = "target_temperature"
+    temperature_max = "temperature_max"
+    temperature_min = "temperature_min"
     tbh = "tbh"
     error_code = "error_code"
     # --- Extended attributes exposing data already parsed by C3 message bodies ---
