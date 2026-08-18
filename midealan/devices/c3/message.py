@@ -53,13 +53,15 @@ class C3FanSpeed(IntEnum):
 class C3UnitRunMode(IntEnum):
     """C3 unit actual running mode.
 
-    Reported via Modbus register 101 (V4.7):
-    ``0: off, 2: cooling, 3: heating``.
+    Reported via Modbus register 101 / 199 (V4.7):
+    ``0: off, 2: cooling, 3: heating, 5: DHW``.
+    DHW=5 added per Modbus doc reg 199 (Heat pump operation mode).
     """
 
     OFF = 0
     COOL = 2
     HEAT = 3
+    DHW = 5
 
 
 # Error code lookup (source: official Modbus V4.7 documentation, table 1).
@@ -574,7 +576,17 @@ class C3UnitParaBody(MessageBody):
         # ODU compressor current in A (raw b[17]). Verified against wired HMI
         # 2026-08-18: raw 0 while compressor idle, raw 3 when compressor runs.
         self.odu_comp_current = body[data_offset + 16]
-        self.odu_voltage = body[data_offset + 17] * 256 + body[data_offset + 18]
+        # ODU mains voltage — VERIFIED as uint8 (not u16BE).
+        # Log analysis (2026-08-18, 229 X10 frames): body[data_offset+17] is
+        # 0x00 in 229/229 frames (constant reserved/padding). body[data_offset+18]
+        # holds the voltage in Volts (1V/count). It drops 3–4 V under compressor
+        # load (238–240 V idle → 234–236 V running), which matches expected
+        # mains sag on a ~3 kW draw. Reading as u16BE would multiply by 256 on
+        # any future firmware that repurposes the hi byte, so we fix the width.
+        self.odu_voltage = body[data_offset + 18]
+        # Expose the (currently constant) hi byte as diagnostic so a firmware
+        # change is caught immediately instead of silently poisoning voltage.
+        self.raw_b18 = body[data_offset + 17]
         self.exv_current = body[data_offset + 19] * 256 + body[data_offset + 20]
         # canonical name matching Modbus documentation (EXV valve opening)
         self.exv_opening = self.exv_current
@@ -598,25 +610,34 @@ class C3UnitParaBody(MessageBody):
         self.pressure_low = body[data_offset + 44] * 256 + body[data_offset + 45]
         self.temp_th = body[data_offset + 46]
         # LOAD_OUTPUT bitmap at body[data_offset + 32] (data[33] in raw frame).
-        # Bit-mapping validated against wired HMI (Aug-16 pump-run test):
-        #   b2 = Backup heater (TBH)      -> load_output_tbh
-        #   b3 = Water pump interior      -> pump_i
-        #   b4 = SV1 (3-way DHW valve)    -> sv1
-        #   b5 = SV2 (heating valve)      -> sv2
-        #   b6 = Water pump outdoor       -> pump_o
-        #   b7 = Water pump D             -> pump_d
-        # b0/b1 (Pump_C, Pump_S, SV3, gas boiler) were never active in the
-        # reference test; bit assignment for them is tentative.
+        # Bit-mapping — AUTHORITATIVE source: Midea Modbus doc V4.7, reg 129
+        # (Load output, 16-bit). Cross-checked against wired HMI Aug-16 pump test.
+        #
+        # Low byte (raw b[33], parser body[data_offset+32]):
+        #   BIT0 = Electric heater IBH1
+        #   BIT1 = Electric heater IBH2
+        #   BIT2 = Electric heater TBH
+        #   BIT3 = Internal circulation pump (Pump_i)
+        #   BIT4 = SV1
+        #   BIT5 = SV2
+        #   BIT6 = External circulation pump (Pump_o)
+        #   BIT7 = Domestic hot water circulation pump (Pump_d)
+        # High byte (raw b[32], parser body[data_offset+31]):
+        #   BIT8  = Mixed water loop pump Pump_c (Zone 2)
+        #   BIT9..BIT15 = RESERVED per Modbus doc
+        #
+        # Previously this parser exposed sv3/crankcase_heater/pump_s/alarm/
+        # aux_heat on hi-byte bits 1..6 — those bit positions belong to
+        # reg 128 (Status bit 1) and possibly reside in a different LAN
+        # offset. They are NOT part of reg 129 and have been removed.
+        # Scenario logs (defrost / alarm / DHW anti-freeze) required to
+        # locate reg 128 in the LAN payload before re-adding them.
         _load = body[data_offset + 32]
-        # --- Reg 129 (Load output) — 16-bit ---
-        # Low byte at raw b[33] (parser body[data_offset+32])
-        # High byte at raw b[32] (parser body[data_offset+31])
-        # Mapping strictly per Midea Modbus doc reg 40130.
         _load_hi = body[data_offset + 31]
         self.load_output_raw     = _load
         self.load_output_raw_hi  = _load_hi
         self.load_output_reg129  = (_load_hi << 8) | _load
-        # --- low byte ---
+        # --- reg 129 low byte (defined bits 0..7) ---
         self.ibh1_on             = bool(_load & 0x01)
         self.ibh2_on             = bool(_load & 0x02)
         self.load_output_tbh     = bool(_load & 0x04)
@@ -625,18 +646,52 @@ class C3UnitParaBody(MessageBody):
         self.sv2_open            = bool(_load & 0x20)
         self.pump_o_running      = bool(_load & 0x40)
         self.pump_d_running      = bool(_load & 0x80)
-        # --- high byte (tentative offset b[32]; all-zero in verified arch) ---
-        self.pump_c_running      = bool(_load_hi & 0x01)  # BIT8
-        self.sv3_open            = bool(_load_hi & 0x02)  # BIT9
-        self.crankcase_heater_on = bool(_load_hi & 0x04)  # BIT10
-        self.pump_s_running      = bool(_load_hi & 0x08)  # BIT11
-        self.alarm_on            = bool(_load_hi & 0x10)  # BIT12
-        self.aux_heat_on         = bool(_load_hi & 0x40)  # BIT14
-        # Compressor running flag: bit 5 of raw b[32] (body[data_offset+31]).
-        # Verified against wired HMI (Aug-18): comp_run_freq>0 iff (raw & 0x20).
-        _cmp = body[data_offset + 31]
-        self.compressor_status_raw = _cmp
-        self.compressor_on = bool(_cmp & 0x20)
+        # --- reg 129 high byte (only BIT8 defined) ---
+        self.pump_c_running      = bool(_load_hi & 0x01)  # BIT8 Pump_c (Zone 2)
+        # Legacy hi-byte attributes retained for HA entity compatibility
+        # (DEPLOY___init__.py / midea_devices.py / en.json still reference
+        # them). They belong to reg 128 (Status bit 1) — bit positions
+        # differ between reg 128 and reg 129 hi-byte, so exposing them
+        # against reg 129 hi-byte would be wrong. Set to False until
+        # scenario logs pin the correct LAN offset for reg 128.
+        self.sv3_open            = False  # reg 128 BIT0 — LAN offset unknown
+        self.crankcase_heater_on = False  # reg 128 BIT1 — LAN offset unknown
+        self.pump_s_running      = False  # reg 128 BIT2 — LAN offset unknown
+        self.alarm_on            = False  # reg 128 BIT3 — LAN offset unknown
+        self.aux_heat_on         = False  # reg 128 BIT5 — LAN offset unknown
+        # --- Diagnostic raw bytes: reg 128 (Status bit 1) LAN offset
+        # candidates. Byte-variability analysis (2026-08-18 HA log, 229
+        # X10 frames) flags these as bit-field-shaped (2-14 unique values,
+        # low variability). Expose as raw uint8 for user-side correlation
+        # against scenario events (defrost, alarm, DHW anti-freeze, etc.).
+        self.raw_b19 = body[data_offset + 18]  # X10 offset 19, 232-240 dyn
+        self.raw_b20 = body[data_offset + 19]  # X10 offset 20, FLAG 0/1
+        self.raw_b21 = body[data_offset + 20]  # X10 offset 21, 0-224 (14 uniq)
+        self.raw_b31 = body[data_offset + 30]  # X10 offset 31, LOW-VAR 0-96
+        self.raw_b56 = body[data_offset + 55]  # X10 offset 56, DYNAMIC 0-129
+        self.raw_b57 = body[data_offset + 56]  # X10 offset 57, FLAG 0/12
+        self.raw_b58 = body[data_offset + 57]  # X10 offset 58, FLAG 0/1
+        self.raw_b59 = body[data_offset + 58]  # X10 offset 59, DYNAMIC 0-250
+        # System-active flag — VERIFIED (2026-08-18 HA log, 229 X10 frames).
+        # body[data_offset+58] (frame off 59) is a clean 0/1 field:
+        #   value 1 (n=58): compressor freq>0 in 57/58 frames, pump_i=True
+        #                   in 58/58, instant_power>0 in 58/58.
+        #   value 0 (n=171): compressor idle in 162/171.
+        # Candidate for Modbus reg 128 BIT0 (system-running / compressor-on
+        # status bit). Exposed as a first-class binary_sensor so users get
+        # a stable state entity instead of a raw byte.
+        self.system_active_reg128 = bool(body[data_offset + 58] & 0x01)
+        self.raw_b74 = body[data_offset + 73]  # X10 offset 74, LOW-VAR 176-178
+        self.raw_b83 = body[data_offset + 82]  # X10 offset 83, FLAG 0/1
+        self.raw_b85 = body[data_offset + 84]  # X10 offset 85, FLAG 0/1
+        # Compressor running flag — Modbus reg 129 has NO compressor bit.
+        # Reg 100 (Operating frequency) > 0 is the authoritative signal.
+        # Verified against wired HMI (Aug-18): compressor idle when
+        # comp_run_freq == 0, running when > 0.
+        # Keep compressor_status_raw exposed as diagnostic for the reserved
+        # hi-byte of reg 129 in case future firmware repurposes those bits.
+        self.compressor_status_raw = _load_hi
+        self.compressor_on = self.comp_run_freq > 0
         self.machine_type = body[data_offset + 47]
         self.odu_target_fre = body[data_offset + 48]
         # DC current in A. Correlation vs wired HMI (Aug-16 test):
