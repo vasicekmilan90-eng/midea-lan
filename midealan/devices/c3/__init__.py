@@ -124,10 +124,10 @@ class DeviceAttributes(StrEnum):
     # Aug-16 pump-test correlation additions
     dc_bus_voltage = "dc_bus_voltage"
     instant_power = "instant_power"
-    # LOAD_OUTPUT bitmap decoded flags (X10 byte[33]) - Aug-16 pump test
-    load_output_raw = "load_output_raw"
-    load_output_raw_hi = "load_output_raw_hi"
-    load_output_reg129 = "load_output_reg129"
+    # LOAD_OUTPUT bitmap decoded flags (X10 byte[33]) - Aug-16 pump test.
+    # Raw bytes (load_output_raw / _hi / reg129) removed 2026-08-19 -
+    # individual bits are already exposed as binary_sensors below, and
+    # the reg129 16-bit combination had no physical meaning.
     ibh1_on = "ibh1_on"
     ibh2_on = "ibh2_on"
     sv3_open = "sv3_open"
@@ -146,23 +146,15 @@ class DeviceAttributes(StrEnum):
     # reg 128 (Status bit 1) whose exact position is not yet known.
     # Users can correlate these against scenario events (defrost, alarm,
     # DHW anti-freeze, etc.) to pin down bit assignments.
-    raw_b18 = "raw_b18"
-    raw_b19 = "raw_b19"
-    raw_b20 = "raw_b20"
-    raw_b21 = "raw_b21"
     raw_b31 = "raw_b31"
-    raw_b56 = "raw_b56"
-    raw_b57 = "raw_b57"
-    raw_b58 = "raw_b58"
-    raw_b59 = "raw_b59"
-    raw_b74 = "raw_b74"
-    raw_b83 = "raw_b83"
-    raw_b85 = "raw_b85"
+    # NOTE (2026-08-19 cleanup): raw_b56/57/58/59/74/83/85 removed - all were
+    # low/high bytes of already-parsed u16 registers (water_flow, instant_power,
+    # total_thermal0, instant_power0, instant_renew_power0) or duplicates
+    # (odu_plan_vol_lmt). raw_b31 kept as the only non-duplicate diagnostic.
     # System-active flag (candidate for Modbus reg 128 BIT0 — compressor/
-    # system-running status bit). Derived from body[58] in X10 telemetry.
-    # Verified 100% correlation with comp_run_freq>0 and instant_power>0
-    # over 229 X10 frames (2026-08-18 HA log).
-    system_active_reg128 = "system_active_reg128"
+    # NOTE: system_active_reg128 removed 2026-08-19 - only 79% correlation
+    # with compressor state; compressor_on (from comp_run_freq>0) is the
+    # authoritative single-source-of-truth for compressor running state.
     room_rel_hum = "room_rel_hum"
     # Energy totals from UnitPara body
     # Compressor total run time (hours) - from long X05 notify1 frame
@@ -305,9 +297,6 @@ class MideaC3Device(MideaDevice):
                 DeviceAttributes.dc_current: None,
                 DeviceAttributes.dc_bus_voltage: None,
                 DeviceAttributes.instant_power: None,
-                DeviceAttributes.load_output_raw: None,
-                DeviceAttributes.load_output_raw_hi: None,
-                DeviceAttributes.load_output_reg129: None,
                 DeviceAttributes.ibh1_on: None,
                 DeviceAttributes.ibh2_on: None,
                 DeviceAttributes.sv3_open: None,
@@ -322,19 +311,7 @@ class MideaC3Device(MideaDevice):
                 DeviceAttributes.pump_s_running: None,
                 DeviceAttributes.sv1_open: None,
                 DeviceAttributes.sv2_open: None,
-                DeviceAttributes.raw_b18: None,
-                DeviceAttributes.raw_b19: None,
-                DeviceAttributes.raw_b20: None,
-                DeviceAttributes.raw_b21: None,
                 DeviceAttributes.raw_b31: None,
-                DeviceAttributes.raw_b56: None,
-                DeviceAttributes.raw_b57: None,
-                DeviceAttributes.raw_b58: None,
-                DeviceAttributes.raw_b59: None,
-                DeviceAttributes.raw_b74: None,
-                DeviceAttributes.raw_b83: None,
-                DeviceAttributes.raw_b85: None,
-                DeviceAttributes.system_active_reg128: None,
                 DeviceAttributes.room_rel_hum: None,
                 DeviceAttributes.comp_total_run_time: None,
                 DeviceAttributes.wifi_module_serial: None,
