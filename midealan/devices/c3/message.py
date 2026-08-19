@@ -584,9 +584,10 @@ class C3UnitParaBody(MessageBody):
         # mains sag on a ~3 kW draw. Reading as u16BE would multiply by 256 on
         # any future firmware that repurposes the hi byte, so we fix the width.
         self.odu_voltage = body[data_offset + 18]
-        # Expose the (currently constant) hi byte as diagnostic so a firmware
-        # change is caught immediately instead of silently poisoning voltage.
-        self.raw_b18 = body[data_offset + 17]
+        # NOTE: body[data_offset + 17] (frame offset 18) is consistently 0 in
+        # 229 X10 frames analyzed - kept as unread hi-byte guard for
+        # odu_voltage. If a future firmware sets it non-zero, revisit the
+        # u8 vs u16BE decision.
         self.exv_current = body[data_offset + 19] * 256 + body[data_offset + 20]
         # canonical name matching Modbus documentation (EXV valve opening)
         self.exv_opening = self.exv_current
@@ -634,9 +635,25 @@ class C3UnitParaBody(MessageBody):
         # locate reg 128 in the LAN payload before re-adding them.
         _load = body[data_offset + 32]
         _load_hi = body[data_offset + 31]
-        self.load_output_raw     = _load
-        self.load_output_raw_hi  = _load_hi
-        self.load_output_reg129  = (_load_hi << 8) | _load
+        # NOTE: load_output_raw / load_output_raw_hi / load_output_reg129
+        # entities REMOVED (2026-08-19):
+        #   - low byte (_load) is already fully decoded into individual
+        #     binary_sensors below (ibh1_on, ibh2_on, load_output_tbh,
+        #     pump_i_running, sv1_open, sv2_open, pump_o_running,
+        #     pump_d_running) — the raw byte was redundant.
+        #   - hi byte (_load_hi) does NOT belong to reg 129 (bits 9-15
+        #     are RESERVED per Modbus doc V4.7). Log analysis of 229 X10
+        #     frames shows _load_hi has only two values (0/32); bit 5
+        #     tracks compressor state with 100% correlation to
+        #     comp_run_freq>0 → it is the reg 128 "Compressor status"
+        #     flag placed adjacent to reg 129 in the LAN payload.
+        #     We do NOT expose it as a separate entity because
+        #     compressor_on (derived from comp_run_freq>0) already carries
+        #     the same information from the authoritative source
+        #     (Modbus reg 100 Operating frequency).
+        #   - reg129 (16-bit combined) was a mathematical fiction:
+        #     combining bytes from two different registers produced
+        #     values with no physical meaning.
         # --- reg 129 low byte (defined bits 0..7) ---
         self.ibh1_on             = bool(_load & 0x01)
         self.ibh2_on             = bool(_load & 0x02)
@@ -664,26 +681,19 @@ class C3UnitParaBody(MessageBody):
         # X10 frames) flags these as bit-field-shaped (2-14 unique values,
         # low variability). Expose as raw uint8 for user-side correlation
         # against scenario events (defrost, alarm, DHW anti-freeze, etc.).
-        self.raw_b19 = body[data_offset + 18]  # X10 offset 19, 232-240 dyn
-        self.raw_b20 = body[data_offset + 19]  # X10 offset 20, FLAG 0/1
-        self.raw_b21 = body[data_offset + 20]  # X10 offset 21, 0-224 (14 uniq)
-        self.raw_b31 = body[data_offset + 30]  # X10 offset 31, LOW-VAR 0-96
-        self.raw_b56 = body[data_offset + 55]  # X10 offset 56, DYNAMIC 0-129
-        self.raw_b57 = body[data_offset + 56]  # X10 offset 57, FLAG 0/12
-        self.raw_b58 = body[data_offset + 57]  # X10 offset 58, FLAG 0/1
-        self.raw_b59 = body[data_offset + 58]  # X10 offset 59, DYNAMIC 0-250
-        # System-active flag — VERIFIED (2026-08-18 HA log, 229 X10 frames).
-        # body[data_offset+58] (frame off 59) is a clean 0/1 field:
-        #   value 1 (n=58): compressor freq>0 in 57/58 frames, pump_i=True
-        #                   in 58/58, instant_power>0 in 58/58.
-        #   value 0 (n=171): compressor idle in 162/171.
-        # Candidate for Modbus reg 128 BIT0 (system-running / compressor-on
-        # status bit). Exposed as a first-class binary_sensor so users get
-        # a stable state entity instead of a raw byte.
-        self.system_active_reg128 = bool(body[data_offset + 58] & 0x01)
-        self.raw_b74 = body[data_offset + 73]  # X10 offset 74, LOW-VAR 176-178
-        self.raw_b83 = body[data_offset + 82]  # X10 offset 83, FLAG 0/1
-        self.raw_b85 = body[data_offset + 84]  # X10 offset 85, FLAG 0/1
+        # NOTE (2026-08-19 cleanup, pump-run log validation):
+        #   raw_b19 removed - duplicated odu_voltage (same byte).
+        #   raw_b20, raw_b21 removed - hi/lo bytes of exv_opening (reg 103).
+        #   raw_b56 removed - low byte of water_flow (body[+54]<<8 | body[+55]).
+        #   raw_b57 removed - duplicated odu_plan_vol_lmt (body[+56]).
+        #   raw_b58 removed - high byte of instant_power (body[+57]<<8 | body[+58]).
+        #   raw_b59 removed - low byte of instant_power.
+        #   raw_b74 removed - low byte of total_thermal0 (body[+72]<<8 | body[+73]).
+        #   raw_b83 removed - high byte of instant_power0 (body[+82]<<8 | body[+83]).
+        #   raw_b85 removed - high byte of instant_renew_power0 (body[+84]<<8 | body[+85]).
+        # raw_b31 is the only non-duplicate diagnostic byte and is kept for
+        # further scenario correlation (idle=32, pump_i+flow=96 observed).
+        self.raw_b31 = body[data_offset + 30]  # X10 offset 31, status bitmap candidate
         # Compressor running flag — Modbus reg 129 has NO compressor bit.
         # Reg 100 (Operating frequency) > 0 is the authoritative signal.
         # Verified against wired HMI (Aug-18): compressor idle when
