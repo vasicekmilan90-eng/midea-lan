@@ -717,10 +717,14 @@ class C3UnitParaBody(MessageBody):
         _wf_raw = body[data_offset + 54] * 256 + body[data_offset + 55]
         self.water_flow = _wf_raw / 100
         self.odu_plan_vol_lmt = body[data_offset + 56]
-        # Instant power in kW (u16 BE /100). Correlation vs wired HMI (Aug-16):
-        #   idle 0.00-2.13 kW ; run peak 4.24 kW. Overrides earlier X10-energy
-        #   frozen sample at bytes 82..83 (that offset carries the last energy
-        #   commit, not the instantaneous reading).
+        # reg 148 "Real-time heating capacity" — THERMAL OUTPUT in kW (u16 BE
+        # /100), i.e. heat delivered to the water, NOT electrical draw.
+        # Modbus V4.7 reg 148 + energy-balance validation (2026-08-19 log):
+        #   capacity(instant_power) = consumption(instant_power0)
+        #                             + renewable(instant_renew_power0)
+        # Earlier correlation vs wired HMI (Aug-16) showed 0-4.24 kW; that was
+        # the thermal side, not consumption. The electrical draw is
+        # instant_power0. See the power-triad block further down.
         self.instant_power = ((body[data_offset + 57] << 8) + body[data_offset + 58]) / 100
         # keep current_unit_capacity attribute (moved to a different offset if needed)
         # setting to None here as the previous mapping was incorrect.
@@ -751,15 +755,36 @@ class C3UnitParaBody(MessageBody):
         self.heat_elec_total_capacity0 = (
             (body[data_offset + 80] << 8) + body[data_offset + 81]
         )
-        # raw uint16 in 0.01 kW units -> divide by 100 for kW
-        # (verified against wired HMI: raw 209 -> 2.09 kW)
+        # --- Real-time power triad — SEMANTICS VERIFIED against Modbus V4.7 ---
+        # Cross-referenced with the Modbus register map (120L doc) AND validated
+        # against the 2026-08-19 log (443 X10 frames, full compressor cycle):
+        #   reg 148 "Real-time heating capacity"        -> instant_power   (b57/58)
+        #   reg 149 "Real-time renewable heating cap."  -> instant_renew_power0 (b84/85)
+        #   reg 150 "Real-time heating power consumption"-> instant_power0  (b82/83)
+        # Energy balance holds per-frame (median error 0.01 kW over 443 frames):
+        #   capacity = consumption + renewable   =>   COP = capacity / consumption
+        # IMPORTANT: instant_power is the THERMAL OUTPUT (heat delivered), NOT the
+        # electrical draw. The electricity actually consumed is instant_power0.
+        # Do NOT feed instant_power into the HA Energy dashboard as consumption.
+        #
+        # heating power consumption (electrical input) in kW (u16 BE /100)
         self.instant_power0 = ((body[data_offset + 82] << 8) + body[data_offset + 83]) / 100
-        # scaled to kW (0.01 kW units) for consistency with instant_power0
+        # renewable (ambient-harvested) heating capacity in kW (u16 BE /100)
         self.instant_renew_power0 = ((body[data_offset + 84] << 8) + body[data_offset + 85]) / 100
         # TODO: previous version aliased this to instant_renew_power0 bytes.
         # Best-effort correction: use the next uint16 at offset 86-87.
         # Confirm against wired HMI once a non-zero PV production sample exists.
         self.total_renew_power0 = ((body[data_offset + 86] << 8) + body[data_offset + 87]) / 100
+        # Real-time heating COP (reg 151). CONFIRMED NOT transmitted in any LAN
+        # frame (X10/X04): no byte/u16 offset matches capacity/consumption
+        # per-frame across the 2026-08-19 log. We therefore DERIVE it from the
+        # verified capacity/consumption triad:  COP = capacity / consumption.
+        # Only meaningful while the unit is actually producing heat; guard
+        # against divide-by-zero and idle noise (consumption ~0.01 kW off).
+        if self.instant_power0 and self.instant_power0 > 0.05:
+            self.instant_cop = round(self.instant_power / self.instant_power0, 2)
+        else:
+            self.instant_cop = None
         # ------------------------------------------------------------------
         # IDU / ODU software versions (Modbus reg 130 / reg 1042 mapped
         # into X10 telemetry frame). Verified against wired HMI:
