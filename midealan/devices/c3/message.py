@@ -694,6 +694,22 @@ class C3UnitParaBody(MessageBody):
         # raw_b31 is the only non-duplicate diagnostic byte and is kept for
         # further scenario correlation (idle=32, pump_i+flow=96 observed).
         self.raw_b31 = body[data_offset + 30]  # X10 offset 31, status bitmap candidate
+        # raw_b31 decoded across 443 frames (2026-08-19 log): only bit5/bit6 vary,
+        # all other bits constant 0. Observed values: 0/32/64/96.
+        #   bit6 (0x40): Water circuit active. r=+0.99 vs pump_i, +0.99 vs flow>0,
+        #                +0.98 vs sv1, +0.93 vs compressor. High confidence.
+        #   bit5 (0x20): Unit demand candidate. Best correlation is r=+0.71 vs TBH,
+        #                but no clean 1:1 mapping to any Modbus reg-128 bit — kept
+        #                as a DIAGNOSTIC candidate until scenario logs confirm.
+        self.water_circuit_active = bool(self.raw_b31 & 0x40)
+        self.unit_demand = bool(self.raw_b31 & 0x20)
+        # raw_b65: X10 offset 65. 15 distinct values (46..99) over 443 frames.
+        # Sentinel 99 while idle (357 frames); falls to 46..59 during operation.
+        # Correlates inversely with COP (r=-0.80) and with water_flow. No clean
+        # Modbus register match — behaves like a derived/scaled internal value.
+        # Exposed as a raw diagnostic only; do NOT rename until scenario logs
+        # (defrost, DHW anti-freeze, alarm events) pin down its meaning.
+        self.raw_b65 = body[data_offset + 64]
         # Compressor running flag — Modbus reg 129 has NO compressor bit.
         # Reg 100 (Operating frequency) > 0 is the authoritative signal.
         # Verified against wired HMI (Aug-18): compressor idle when
@@ -710,8 +726,16 @@ class C3UnitParaBody(MessageBody):
         # DC-bus voltage in V. Correlation vs wired HMI: raw 33->330V, 37->370V.
         self.dc_bus_voltage = body[data_offset + 50] * 10
         self.temp_tf = body[data_offset + 51]
-        self.idu_t1s1 = body[data_offset + 52]
-        self.idu_t1s2 = body[data_offset + 53]
+        # Zone 1/2 calculated water setpoint (T1s) from the weather-compensation
+        # curve. Sentinel 0xFF (255) = "curve control inactive / no calculated
+        # value" — verified against the 2026-08-19 log where idu_t1s1 = 255 in
+        # 441/443 frames (real 27 °C in only 2) and idu_t1s2 = 255 in all 443.
+        # Convert to None so HA renders the entity as unavailable instead of a
+        # nonsensical 255 °C reading.
+        _t1s1 = body[data_offset + 52]
+        _t1s2 = body[data_offset + 53]
+        self.idu_t1s1 = None if _t1s1 == 255 else _t1s1
+        self.idu_t1s2 = None if _t1s2 == 255 else _t1s2
         # raw uint16 in 0.01 m3/h units -> divide by 100 for m3/h
         # (verified against wired HMI: raw 53 -> 0.53 m3/h)
         _wf_raw = body[data_offset + 54] * 256 + body[data_offset + 55]
