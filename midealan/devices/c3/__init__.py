@@ -123,7 +123,16 @@ class DeviceAttributes(StrEnum):
     dc_current = "dc_current"
     # Aug-16 pump-test correlation additions
     dc_bus_voltage = "dc_bus_voltage"
+    # --- Real-time power triad + derived COP (semantics verified vs Modbus V4.7,
+    # regs 148/149/150/151, and per-frame energy balance on 2026-08-19 log) ---
+    #   instant_power        = heating CAPACITY / thermal output (reg 148)
+    #   instant_power0       = heating power CONSUMPTION / electrical draw (reg 150)
+    #   instant_renew_power0 = renewable (ambient-harvested) capacity (reg 149)
+    #   instant_cop          = derived capacity/consumption (reg 151 NOT sent on LAN)
     instant_power = "instant_power"
+    instant_power0 = "instant_power0"
+    instant_renew_power0 = "instant_renew_power0"
+    instant_cop = "instant_cop"
     # LOAD_OUTPUT bitmap decoded flags (X10 byte[33]) - Aug-16 pump test.
     # Raw bytes (load_output_raw / _hi / reg129) removed 2026-08-19 -
     # individual bits are already exposed as binary_sensors below, and
@@ -297,6 +306,9 @@ class MideaC3Device(MideaDevice):
                 DeviceAttributes.dc_current: None,
                 DeviceAttributes.dc_bus_voltage: None,
                 DeviceAttributes.instant_power: None,
+                DeviceAttributes.instant_power0: None,
+                DeviceAttributes.instant_renew_power0: None,
+                DeviceAttributes.instant_cop: None,
                 DeviceAttributes.ibh1_on: None,
                 DeviceAttributes.ibh2_on: None,
                 DeviceAttributes.sv3_open: None,
