@@ -1,5 +1,6 @@
 """Midea local C3 message."""
 
+import re
 from enum import IntEnum
 
 from midealocal.const import DeviceType
@@ -14,6 +15,40 @@ from midealocal.message import (
 TEMP_NEG_VALUE = 127
 ECO_FUNCTION_STATE_MASK = 0x01
 ECO_TIMER_STATE_MASK = 0x02
+
+# Firmware build-date encoding inside the WiFi module ASCII tail
+# ("H<idu>F<odu><YYMMDD>...").
+_BUILD_DATE_PATTERN = re.compile(r"H\d{2,3}F\d{2}(\d{2})(\d{2})(\d{2})")
+
+
+def _parse_ascii_tail(body: bytearray, data_offset: int) -> str | None:
+    """Extract the dash-padded, NUL-terminated ASCII tail identifier.
+
+    The WiFi module serial / model identifier is appended to C3 telemetry
+    frames as an ASCII block preceded by a run of dash ("-") padding bytes
+    and terminated with NUL bytes. Layout observed on captured frames:
+    bytes ~96..159 = dashes, ~160..191 = ASCII serial, then NUL. The exact
+    offsets vary between firmware revisions so the block is located by
+    scanning for the dash run rather than by fixed offset.
+    """
+    dash_idx = body.find(b"-" * 20, data_offset)
+    if dash_idx == -1:
+        return None
+    tail = body[dash_idx:]
+    start = 0
+    while start < len(tail) and tail[start : start + 1] == b"-":
+        start += 1
+    end = start
+    while end < len(tail) and tail[end] != 0:
+        end += 1
+    candidate = bytes(tail[start:end]).strip()
+    if not candidate:
+        return None
+    try:
+        decoded = candidate.decode("ascii")
+    except UnicodeDecodeError:
+        return None
+    return decoded if decoded.isprintable() else None
 
 
 class C3SilentLevel(IntEnum):
@@ -457,30 +492,8 @@ class C3EnergyBody(MessageBody):
         self.t5s = body[data_offset + 12]
         self.tas = body[data_offset + 13]
         # WiFi module serial / model identifier is appended after the main
-        # payload as an ASCII block preceded by a run of dash ("-") padding
-        # bytes and terminated with NUL bytes. Layout observed on captured
-        # frames: bytes ~96..159 = dashes, ~160..191 = ASCII serial, then NUL.
-        # Search robustly (offsets may vary across firmware revisions).
-        self.wifi_module_serial: str | None = None
-        dash_run = b"-" * 20
-        dash_idx = body.find(dash_run, data_offset)
-        if dash_idx != -1:
-            tail = body[dash_idx:]
-            # skip the dash padding
-            start = 0
-            while start < len(tail) and tail[start:start + 1] == b"-":
-                start += 1
-            end = start
-            while end < len(tail) and tail[end] != 0:
-                end += 1
-            candidate = bytes(tail[start:end]).strip()
-            if candidate:
-                try:
-                    decoded = candidate.decode("ascii")
-                except UnicodeDecodeError:
-                    decoded = None
-                if decoded and decoded.isprintable():
-                    self.wifi_module_serial = decoded
+        # payload; see _parse_ascii_tail for the layout.
+        self.wifi_module_serial: str | None = _parse_ascii_tail(body, data_offset)
 
 
 class C3SilenceBody(MessageBody):
@@ -490,11 +503,13 @@ class C3SilenceBody(MessageBody):
         """Initialize C3 query silence message body."""
         super().__init__(body)
         self.silent_mode = body[data_offset] & 0x1 > 0
+        # Normalize to lowercase so the reported value matches the options
+        # published by MideaC3Device._silent_modes.
         self.silent_level = C3SilentLevel(
             (body[data_offset] & 0x1) + ((body[data_offset] & 0x8) >> 2)
             if self.silent_mode
             else C3SilentLevel.OFF.value,
-        ).name
+        ).name.lower()
         # Message protocol information:
         # silence_function_state: Byte 1, BIT 0
         # silence_timer1_state: Byte 1, BIT 1
@@ -579,8 +594,8 @@ class C3UnitParaBody(MessageBody):
         # ODU mains voltage — VERIFIED as uint8 (not u16BE).
         # Log analysis (2026-08-18, 229 X10 frames): body[data_offset+17] is
         # 0x00 in 229/229 frames (constant reserved/padding). body[data_offset+18]
-        # holds the voltage in Volts (1V/count). It drops 3–4 V under compressor
-        # load (238–240 V idle → 234–236 V running), which matches expected
+        # holds the voltage in Volts (1V/count). It drops 3-4 V under compressor
+        # load (238-240 V idle → 234-236 V running), which matches expected
         # mains sag on a ~3 kW draw. Reading as u16BE would multiply by 256 on
         # any future firmware that repurposes the hi byte, so we fix the width.
         self.odu_voltage = body[data_offset + 18]
@@ -703,13 +718,18 @@ class C3UnitParaBody(MessageBody):
         #                as a DIAGNOSTIC candidate until scenario logs confirm.
         self.water_circuit_active = bool(self.raw_b31 & 0x40)
         self.unit_demand = bool(self.raw_b31 & 0x20)
-        # raw_b65: X10 offset 65. 15 distinct values (46..99) over 443 frames.
-        # Sentinel 99 while idle (357 frames); falls to 46..59 during operation.
-        # Correlates inversely with COP (r=-0.80) and with water_flow. No clean
-        # Modbus register match — behaves like a derived/scaled internal value.
-        # Exposed as a raw diagnostic only; do NOT rename until scenario logs
-        # (defrost, DHW anti-freeze, alarm events) pin down its meaning.
-        self.raw_b65 = body[data_offset + 64]
+        # raw_b65: dynamic internal value of the water circuit / pump.
+        # NOTE (off-by-one fix): the previous offset (data_offset + 64) read a
+        # byte that is constantly 0 in every captured frame. The real dynamic
+        # value lives one byte further, at data_offset + 65 (X10 offset 66).
+        # Observed behaviour there: values ~46..99, sentinel 99 while idle,
+        # dropping to ~51..58 during operation. Strong inverse correlation with
+        # water_flow (r=-0.87) and with COP (r=-0.80). No clean Modbus register
+        # match — behaves like a derived/scaled internal regulation value.
+        # Kept as a HIDDEN raw diagnostic only; do NOT rename or promote until
+        # scenario logs (defrost, DHW anti-freeze, alarm events) confirm its
+        # meaning. Attribute name kept as raw_b65 for entity_id stability.
+        self.raw_b65 = body[data_offset + 65]
         # Compressor running flag — Modbus reg 129 has NO compressor bit.
         # Reg 100 (Operating frequency) > 0 is the authoritative signal.
         # Verified against wired HMI (Aug-18): compressor idle when
@@ -818,30 +838,17 @@ class C3UnitParaBody(MessageBody):
         # X10 / X04 / long-X05 payloads - the C3 telemetry frames only
         # expose IDU + ODU firmware. Left unimplemented until an
         # authoritative source is available.
-        self.idu_software_version = body[data_offset + 93]
-        self.odu_software_version = body[data_offset + 94]
+        # Guard: leave version bytes unset when the frame is short.
+        if len(body) > data_offset + 94:
+            self.idu_software_version = body[data_offset + 93]
+            self.odu_software_version = body[data_offset + 94]
+        else:
+            self.idu_software_version = None
+            self.odu_software_version = None
         # ------------------------------------------------------------------
         # WiFi module serial: appended as ASCII after a run of "-" padding.
         # Verified: bytes 160..191 = "0000C3310171H120F24114100123MNJ2".
-        self.wifi_module_serial: str | None = None
-        dash_run = b"-" * 20
-        dash_idx = body.find(dash_run, data_offset)
-        if dash_idx != -1:
-            tail = body[dash_idx:]
-            start = 0
-            while start < len(tail) and tail[start:start + 1] == b"-":
-                start += 1
-            end = start
-            while end < len(tail) and tail[end] != 0:
-                end += 1
-            candidate = bytes(tail[start:end]).strip()
-            if candidate:
-                try:
-                    decoded = candidate.decode("ascii")
-                except UnicodeDecodeError:
-                    decoded = None
-                if decoded and decoded.isprintable():
-                    self.wifi_module_serial = decoded
+        self.wifi_module_serial: str | None = _parse_ascii_tail(body, data_offset)
 
         # ------------------------------------------------------------------
         # IDU / ODU software version strings (with build date).
@@ -863,32 +870,30 @@ class C3UnitParaBody(MessageBody):
         #   odu_software_version_str = "V<n>"
         # Plus a diagnostic "build_info" attribute carrying the printable
         # ASCII tail (contains H<xxx>F<xx><digits> factory identifiers).
-        try:
-            self.idu_software_version_str = f"V{int(self.idu_software_version)}"
-        except Exception:
-            self.idu_software_version_str = None
-        try:
-            self.odu_software_version_str = f"V{int(self.odu_software_version)}"
-        except Exception:
-            self.odu_software_version_str = None
-        # Optional: parse a plausible build date embedded in the tail
-        # ("H<idu>F<odu><YYMMDD>..."). We DO NOT overwrite the version
-        # strings with it, only append when it looks valid (YY 20-30, MM 01-12,
-        # DD 01-31).
+        # IDU/ODU version bytes are single unsigned bytes; format directly.
+        self.idu_software_version_str = (
+            f"V{self.idu_software_version}"
+            if self.idu_software_version is not None
+            else None
+        )
+        self.odu_software_version_str = (
+            f"V{self.odu_software_version}"
+            if self.odu_software_version is not None
+            else None
+        )
+        # Optional: append the plausible build date embedded in the ASCII
+        # tail ("H<idu>F<odu><YYMMDD>..."). Only appended when the parsed
+        # values look valid (YY 20-40, MM 01-12, DD 01-31).
         self.build_info = self.wifi_module_serial
-        try:
-            import re as _re
-            m = _re.search(r"H\d{2,3}F\d{2}(\d{2})(\d{2})(\d{2})", self.wifi_module_serial or "")
-            if m:
-                yy, mm, dd = (int(x) for x in m.groups())
-                if 20 <= yy <= 40 and 1 <= mm <= 12 and 1 <= dd <= 31:
-                    date_fmt = f"20{yy:02d}-{mm:02d}-{dd:02d}"
-                    if self.idu_software_version_str:
-                        self.idu_software_version_str = f"{self.idu_software_version_str} ({date_fmt})"
-                    if self.odu_software_version_str:
-                        self.odu_software_version_str = f"{self.odu_software_version_str} ({date_fmt})"
-        except Exception:
-            pass
+        match = _BUILD_DATE_PATTERN.search(self.wifi_module_serial or "")
+        if match:
+            yy, mm, dd = (int(x) for x in match.groups())
+            if 20 <= yy <= 40 and 1 <= mm <= 12 and 1 <= dd <= 31:
+                date_fmt = f"20{yy:02d}-{mm:02d}-{dd:02d}"
+                if self.idu_software_version_str:
+                    self.idu_software_version_str += f" ({date_fmt})"
+                if self.odu_software_version_str:
+                    self.odu_software_version_str += f" ({date_fmt})"
 
 
 
@@ -913,9 +918,13 @@ class C3UnitParaExtBody(MessageBody):
         # Compressor total run time (hours). Verified against wired HMI.
         # data_offset=1 skips body_type; absolute frame offsets are 57-58,
         # so relative to data_offset we read + 56 and + 57.
-        self.comp_total_run_time = (
-            body[data_offset + 56] * 256 + body[data_offset + 57]
-        )
+        # Guard: leave the field unset if the frame is truncated.
+        if len(body) > data_offset + 57:
+            self.comp_total_run_time = (
+                body[data_offset + 56] * 256 + body[data_offset + 57]
+            )
+        else:
+            self.comp_total_run_time = None
 
 
 class MessageC3Response(MessageResponse):
