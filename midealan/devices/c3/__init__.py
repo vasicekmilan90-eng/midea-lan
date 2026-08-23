@@ -151,7 +151,7 @@ class DeviceAttributes(StrEnum):
     pump_s_running = "pump_s_running"
     sv1_open = "sv1_open"
     sv2_open = "sv2_open"
-    # Diagnostic raw uint8 exposures — LAN offset candidates for Modbus
+    # Diagnostic raw uint8 exposures - LAN offset candidates for Modbus
     # reg 128 (Status bit 1) whose exact position is not yet known.
     # Users can correlate these against scenario events (defrost, alarm,
     # DHW anti-freeze, etc.) to pin down bit assignments.
@@ -165,7 +165,7 @@ class DeviceAttributes(StrEnum):
     # low/high bytes of already-parsed u16 registers (water_flow, instant_power,
     # total_thermal0, instant_power0, instant_renew_power0) or duplicates
     # (odu_plan_vol_lmt). raw_b31 kept as the only non-duplicate diagnostic.
-    # System-active flag (candidate for Modbus reg 128 BIT0 — compressor/
+    # System-active flag (candidate for Modbus reg 128 BIT0 - compressor/
     # NOTE: system_active_reg128 removed 2026-08-19 - only 79% correlation
     # with compressor state; compressor_on (from comp_run_freq>0) is the
     # authoritative single-source-of-truth for compressor running state.
