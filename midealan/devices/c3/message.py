@@ -1,6 +1,5 @@
 """Midea local C3 message."""
 
-import re
 from enum import IntEnum
 
 from midealocal.const import DeviceType
@@ -15,10 +14,6 @@ from midealocal.message import (
 TEMP_NEG_VALUE = 127
 ECO_FUNCTION_STATE_MASK = 0x01
 ECO_TIMER_STATE_MASK = 0x02
-
-# Firmware build-date encoding inside the WiFi module ASCII tail
-# ("H<idu>F<odu><YYMMDD>...").
-_BUILD_DATE_PATTERN = re.compile(r"H\d{2,3}F\d{2}(\d{2})(\d{2})(\d{2})")
 
 
 def _parse_ascii_tail(body: bytearray, data_offset: int) -> str | None:
@@ -851,26 +846,17 @@ class C3UnitParaBody(MessageBody):
         self.wifi_module_serial: str | None = _parse_ascii_tail(body, data_offset)
 
         # ------------------------------------------------------------------
-        # IDU / ODU software version strings (with build date).
-        # The wired HMI shows firmware as e.g. "V14 24-11-41" - numeric part
-        # is already exposed as idu_software_version / odu_software_version
-        # (integers). Build date is embedded inside the ASCII tail after the
-        # H/F markers, e.g. "...H120F24114100123MNJ2".
-        # Layout observed:
-        #   H<idu_ver 3 digits> F<odu_ver 2 digits> <date YYMMDDx>
-        # We parse it best-effort; on any mismatch we fall back to the plain
-        # numeric "V<n>" string so the entity is always populated.
-        self.idu_software_version_str: str | None = None
-        self.odu_software_version_str: str | None = None
-        # Numeric byte values at b[94]/b[95] match the wired HMI display
-        # ("V14" / "V64"). The build-date encoding is NOT present in the
-        # current C3 telemetry frames (verified across all captured logs
-        # + Aug-18 archive). We therefore expose two safe strings:
+        # IDU / ODU software version strings.
+        # Numeric byte values at b[93]/b[94] match the wired HMI display
+        # ("V14" / "V64") one-to-one. The wired HMI also shows a build date
+        # ("V14 24-11-41") but the encoding is NOT reliably present in the
+        # X10 telemetry frames captured so far - the ASCII tail contains
+        # H<xxx>F<xx><digits> factory identifiers whose meaning is not yet
+        # documented. We therefore expose two safe strings and let the
+        # printable tail through as a separate diagnostic:
         #   idu_software_version_str = "V<n>"  (matches HMI exactly)
         #   odu_software_version_str = "V<n>"
-        # Plus a diagnostic "build_info" attribute carrying the printable
-        # ASCII tail (contains H<xxx>F<xx><digits> factory identifiers).
-        # IDU/ODU version bytes are single unsigned bytes; format directly.
+        #   build_info               = raw ASCII tail (for future decoding)
         self.idu_software_version_str = (
             f"V{self.idu_software_version}"
             if self.idu_software_version is not None
@@ -881,19 +867,16 @@ class C3UnitParaBody(MessageBody):
             if self.odu_software_version is not None
             else None
         )
-        # Optional: append the plausible build date embedded in the ASCII
-        # tail ("H<idu>F<odu><YYMMDD>..."). Only appended when the parsed
-        # values look valid (YY 20-40, MM 01-12, DD 01-31).
+        # Expose the printable ASCII tail as a diagnostic. The tail follows
+        # the shape "<serial>H<xxx>F<xx><digits>..." (observed sample:
+        # "0000C3310171H120F24114100123MNJ2"). The H<xxx>/F<xx> groups do
+        # NOT match the IDU/ODU version bytes at b[93]/b[94] (14 / 64 on
+        # this unit) and the trailing digit block has not been decoded to
+        # a build date on any captured frame - the previous best-effort
+        # YYMMDD parse was speculative and never matched, so it has been
+        # removed. Re-add once the F-tail encoding is documented (e.g.
+        # from an authoritative Modbus mapping or additional captures).
         self.build_info = self.wifi_module_serial
-        match = _BUILD_DATE_PATTERN.search(self.wifi_module_serial or "")
-        if match:
-            yy, mm, dd = (int(x) for x in match.groups())
-            if 20 <= yy <= 40 and 1 <= mm <= 12 and 1 <= dd <= 31:
-                date_fmt = f"20{yy:02d}-{mm:02d}-{dd:02d}"
-                if self.idu_software_version_str:
-                    self.idu_software_version_str += f" ({date_fmt})"
-                if self.odu_software_version_str:
-                    self.odu_software_version_str += f" ({date_fmt})"
 
 
 
