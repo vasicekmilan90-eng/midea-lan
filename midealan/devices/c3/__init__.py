@@ -156,6 +156,11 @@ class DeviceAttributes(StrEnum):
     # Users can correlate these against scenario events (defrost, alarm,
     # DHW anti-freeze, etc.) to pin down bit assignments.
     raw_b31 = "raw_b31"
+    # Decoded flags from raw_b31 (bit6 = water circuit active, bit5 = demand
+    # candidate) and the raw b65 diagnostic byte (unmapped derived value).
+    water_circuit_active = "water_circuit_active"
+    unit_demand = "unit_demand"
+    raw_b65 = "raw_b65"
     # NOTE (2026-08-19 cleanup): raw_b56/57/58/59/74/83/85 removed - all were
     # low/high bytes of already-parsed u16 registers (water_flow, instant_power,
     # total_thermal0, instant_power0, instant_renew_power0) or duplicates
@@ -324,6 +329,9 @@ class MideaC3Device(MideaDevice):
                 DeviceAttributes.sv1_open: None,
                 DeviceAttributes.sv2_open: None,
                 DeviceAttributes.raw_b31: None,
+                DeviceAttributes.water_circuit_active: None,
+                DeviceAttributes.unit_demand: None,
+                DeviceAttributes.raw_b65: None,
                 DeviceAttributes.room_rel_hum: None,
                 DeviceAttributes.comp_total_run_time: None,
                 DeviceAttributes.wifi_module_serial: None,
@@ -508,15 +516,17 @@ class MideaC3Device(MideaDevice):
         ]:
             message = MessageSetSilent(self._message_protocol_version)
             if attr == DeviceAttributes.silent_mode.value and isinstance(value, bool):
+                # Normalize the stored level once so both sides of the
+                # comparison use the same casing (C3SilentLevel names are
+                # uppercase; _silent_modes publishes lowercase options).
+                current_level = str(
+                    self._attributes[DeviceAttributes.silent_level] or "",
+                ).upper()
                 message.silent_mode = bool(value)
                 message.silent_level = (
                     C3SilentLevel.SILENT
-                    if value
-                    and self._attributes[DeviceAttributes.silent_level]
-                    == C3SilentLevel.OFF.name.lower()
-                    else C3SilentLevel[
-                        self._attributes[DeviceAttributes.silent_level].upper()
-                    ]
+                    if value and current_level == C3SilentLevel.OFF.name
+                    else C3SilentLevel[current_level]
                 )
             elif attr == DeviceAttributes.silent_level.value and isinstance(value, str):
                 normalized_value = value.upper()
