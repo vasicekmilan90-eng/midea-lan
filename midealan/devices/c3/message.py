@@ -591,7 +591,7 @@ class C3UnitParaBody(MessageBody):
         # ODU compressor current in A (raw b[17]). Verified against wired HMI
         # 2026-08-18: raw 0 while compressor idle, raw 3 when compressor runs.
         self.odu_comp_current = body[data_offset + 16]
-        # ODU mains voltage — VERIFIED as uint8 (not u16BE).
+        # ODU mains voltage - VERIFIED as uint8 (not u16BE).
         # Log analysis (2026-08-18, 229 X10 frames): body[data_offset+17] is
         # 0x00 in 229/229 frames (constant reserved/padding). body[data_offset+18]
         # holds the voltage in Volts (1V/count). It drops 3-4 V under compressor
@@ -626,7 +626,7 @@ class C3UnitParaBody(MessageBody):
         self.pressure_low = body[data_offset + 44] * 256 + body[data_offset + 45]
         self.temp_th = body[data_offset + 46]
         # LOAD_OUTPUT bitmap at body[data_offset + 32] (data[33] in raw frame).
-        # Bit-mapping — AUTHORITATIVE source: Midea Modbus doc V4.7, reg 129
+        # Bit-mapping - AUTHORITATIVE source: Midea Modbus doc V4.7, reg 129
         # (Load output, 16-bit). Cross-checked against wired HMI Aug-16 pump test.
         #
         # Low byte (raw b[33], parser body[data_offset+32]):
@@ -643,7 +643,7 @@ class C3UnitParaBody(MessageBody):
         #   BIT9..BIT15 = RESERVED per Modbus doc
         #
         # Previously this parser exposed sv3/crankcase_heater/pump_s/alarm/
-        # aux_heat on hi-byte bits 1..6 — those bit positions belong to
+        # aux_heat on hi-byte bits 1..6 - those bit positions belong to
         # reg 128 (Status bit 1) and possibly reside in a different LAN
         # offset. They are NOT part of reg 129 and have been removed.
         # Scenario logs (defrost / alarm / DHW anti-freeze) required to
@@ -655,7 +655,7 @@ class C3UnitParaBody(MessageBody):
         #   - low byte (_load) is already fully decoded into individual
         #     binary_sensors below (ibh1_on, ibh2_on, load_output_tbh,
         #     pump_i_running, sv1_open, sv2_open, pump_o_running,
-        #     pump_d_running) — the raw byte was redundant.
+        #     pump_d_running) - the raw byte was redundant.
         #   - hi byte (_load_hi) does NOT belong to reg 129 (bits 9-15
         #     are RESERVED per Modbus doc V4.7). Log analysis of 229 X10
         #     frames shows _load_hi has only two values (0/32); bit 5
@@ -682,15 +682,15 @@ class C3UnitParaBody(MessageBody):
         self.pump_c_running      = bool(_load_hi & 0x01)  # BIT8 Pump_c (Zone 2)
         # Legacy hi-byte attributes retained for HA entity compatibility
         # (DEPLOY___init__.py / midea_devices.py / en.json still reference
-        # them). They belong to reg 128 (Status bit 1) — bit positions
+        # them). They belong to reg 128 (Status bit 1) - bit positions
         # differ between reg 128 and reg 129 hi-byte, so exposing them
         # against reg 129 hi-byte would be wrong. Set to False until
         # scenario logs pin the correct LAN offset for reg 128.
-        self.sv3_open            = False  # reg 128 BIT0 — LAN offset unknown
-        self.crankcase_heater_on = False  # reg 128 BIT1 — LAN offset unknown
-        self.pump_s_running      = False  # reg 128 BIT2 — LAN offset unknown
-        self.alarm_on            = False  # reg 128 BIT3 — LAN offset unknown
-        self.aux_heat_on         = False  # reg 128 BIT5 — LAN offset unknown
+        self.sv3_open            = False  # reg 128 BIT0 - LAN offset unknown
+        self.crankcase_heater_on = False  # reg 128 BIT1 - LAN offset unknown
+        self.pump_s_running      = False  # reg 128 BIT2 - LAN offset unknown
+        self.alarm_on            = False  # reg 128 BIT3 - LAN offset unknown
+        self.aux_heat_on         = False  # reg 128 BIT5 - LAN offset unknown
         # --- Diagnostic raw bytes: reg 128 (Status bit 1) LAN offset
         # candidates. Byte-variability analysis (2026-08-18 HA log, 229
         # X10 frames) flags these as bit-field-shaped (2-14 unique values,
@@ -714,7 +714,7 @@ class C3UnitParaBody(MessageBody):
         #   bit6 (0x40): Water circuit active. r=+0.99 vs pump_i, +0.99 vs flow>0,
         #                +0.98 vs sv1, +0.93 vs compressor. High confidence.
         #   bit5 (0x20): Unit demand candidate. Best correlation is r=+0.71 vs TBH,
-        #                but no clean 1:1 mapping to any Modbus reg-128 bit — kept
+        #                but no clean 1:1 mapping to any Modbus reg-128 bit - kept
         #                as a DIAGNOSTIC candidate until scenario logs confirm.
         self.water_circuit_active = bool(self.raw_b31 & 0x40)
         self.unit_demand = bool(self.raw_b31 & 0x20)
@@ -725,12 +725,12 @@ class C3UnitParaBody(MessageBody):
         # Observed behaviour there: values ~46..99, sentinel 99 while idle,
         # dropping to ~51..58 during operation. Strong inverse correlation with
         # water_flow (r=-0.87) and with COP (r=-0.80). No clean Modbus register
-        # match — behaves like a derived/scaled internal regulation value.
+        # match - behaves like a derived/scaled internal regulation value.
         # Kept as a HIDDEN raw diagnostic only; do NOT rename or promote until
         # scenario logs (defrost, DHW anti-freeze, alarm events) confirm its
         # meaning. Attribute name kept as raw_b65 for entity_id stability.
         self.raw_b65 = body[data_offset + 65]
-        # Compressor running flag — Modbus reg 129 has NO compressor bit.
+        # Compressor running flag - Modbus reg 129 has NO compressor bit.
         # Reg 100 (Operating frequency) > 0 is the authoritative signal.
         # Verified against wired HMI (Aug-18): compressor idle when
         # comp_run_freq == 0, running when > 0.
@@ -748,7 +748,7 @@ class C3UnitParaBody(MessageBody):
         self.temp_tf = body[data_offset + 51]
         # Zone 1/2 calculated water setpoint (T1s) from the weather-compensation
         # curve. Sentinel 0xFF (255) = "curve control inactive / no calculated
-        # value" — verified against the 2026-08-19 log where idu_t1s1 = 255 in
+        # value" - verified against the 2026-08-19 log where idu_t1s1 = 255 in
         # 441/443 frames (real 27 °C in only 2) and idu_t1s2 = 255 in all 443.
         # Convert to None so HA renders the entity as unavailable instead of a
         # nonsensical 255 °C reading.
@@ -761,7 +761,7 @@ class C3UnitParaBody(MessageBody):
         _wf_raw = body[data_offset + 54] * 256 + body[data_offset + 55]
         self.water_flow = _wf_raw / 100
         self.odu_plan_vol_lmt = body[data_offset + 56]
-        # reg 148 "Real-time heating capacity" — THERMAL OUTPUT in kW (u16 BE
+        # reg 148 "Real-time heating capacity" - THERMAL OUTPUT in kW (u16 BE
         # /100), i.e. heat delivered to the water, NOT electrical draw.
         # Modbus V4.7 reg 148 + energy-balance validation (2026-08-19 log):
         #   capacity(instant_power) = consumption(instant_power0)
@@ -799,7 +799,7 @@ class C3UnitParaBody(MessageBody):
         self.heat_elec_total_capacity0 = (
             (body[data_offset + 80] << 8) + body[data_offset + 81]
         )
-        # --- Real-time power triad — SEMANTICS VERIFIED against Modbus V4.7 ---
+        # --- Real-time power triad - SEMANTICS VERIFIED against Modbus V4.7 ---
         # Cross-referenced with the Modbus register map (120L doc) AND validated
         # against the 2026-08-19 log (443 X10 frames, full compressor cycle):
         #   reg 148 "Real-time heating capacity"        -> instant_power   (b57/58)
@@ -852,7 +852,7 @@ class C3UnitParaBody(MessageBody):
 
         # ------------------------------------------------------------------
         # IDU / ODU software version strings (with build date).
-        # The wired HMI shows firmware as e.g. "V14 24-11-41" — numeric part
+        # The wired HMI shows firmware as e.g. "V14 24-11-41" - numeric part
         # is already exposed as idu_software_version / odu_software_version
         # (integers). Build date is embedded inside the ASCII tail after the
         # H/F markers, e.g. "...H120F24114100123MNJ2".
