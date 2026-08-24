@@ -346,7 +346,6 @@ class MideaC3Device(MideaDevice):
                 DeviceAttributes.odu_model: None,
                 DeviceAttributes.odu_target_fre: None,
                 DeviceAttributes.fg_capacity_need: None,
-                DeviceAttributes.temp_tf: None,
                 DeviceAttributes.t5s: None,
                 DeviceAttributes.tas: None,
                 DeviceAttributes.idu_t1s1: None,
@@ -456,16 +455,16 @@ class MideaC3Device(MideaDevice):
             else:
                 self._attributes[DeviceAttributes.zone2_water_temp_mode] = False
                 self._attributes[DeviceAttributes.zone2_room_temp_mode] = False
-            new_status[DeviceAttributes.zone1_water_temp_mode.value] = self._attributes[
+            new_status[DeviceAttributes.zone1\_water\_temp\_mode.value] = self._attributes[
                 DeviceAttributes.zone1_water_temp_mode
             ]
-            new_status[DeviceAttributes.zone2_water_temp_mode.value] = self._attributes[
+            new_status[DeviceAttributes.zone2\_water\_temp\_mode.value] = self._attributes[
                 DeviceAttributes.zone2_water_temp_mode
             ]
-            new_status[DeviceAttributes.zone1_room_temp_mode.value] = self._attributes[
+            new_status[DeviceAttributes.zone1\_room\_temp\_mode.value] = self._attributes[
                 DeviceAttributes.zone1_room_temp_mode
             ]
-            new_status[DeviceAttributes.zone2_room_temp_mode.value] = self._attributes[
+            new_status[DeviceAttributes.zone2\_room\_temp\_mode.value] = self._attributes[
                 DeviceAttributes.zone2_room_temp_mode
             ]
 
@@ -514,8 +513,8 @@ class MideaC3Device(MideaDevice):
             DeviceAttributes.silent_mode.value,
             DeviceAttributes.silent_level.value,
         ]:
-            message = MessageSetSilent(self._message_protocol_version)
             if attr == DeviceAttributes.silent_mode.value and isinstance(value, bool):
+                message = MessageSetSilent(self._message_protocol_version)
                 # Normalize the stored level once so both sides of the
                 # comparison use the same casing (C3SilentLevel names are
                 # uppercase; _silent_modes publishes lowercase options).
@@ -529,6 +528,7 @@ class MideaC3Device(MideaDevice):
                     else C3SilentLevel[current_level]
                 )
             elif attr == DeviceAttributes.silent_level.value and isinstance(value, str):
+                message = MessageSetSilent(self._message_protocol_version)
                 normalized_value = value.upper()
                 message.silent_level = C3SilentLevel[normalized_value]
                 message.silent_mode = normalized_value != C3SilentLevel.OFF.name

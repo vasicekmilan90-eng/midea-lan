@@ -18,6 +18,8 @@ from midealan.message import (
 
 _LOGGER = logging.getLogger(__name__)
 
+A1_MIN_BODY_LENGTH = 18
+
 BB_AC_MODES = [0, 3, 1, 2, 4, 5]
 BB_MIN_BODY_LENGTH = 21
 BB_FRESH_AIR_SWITCH_INDEX = 45
@@ -128,15 +130,6 @@ class PowerFormats(IntEnum):
     BCD_ENERGY_BINARY_POWER = 101
 
 
-class NewProtocolQuery(IntEnum):
-    """New protocol tags in query."""
-
-    error_code_query = 0x003F
-    mode_query = 0x0041
-    high_temperature_monitor = 0x0047
-    rate_select = 0x0048
-
-
 class NewProtocolTags(IntEnum):
     """New protocol tags in query and response."""
 
@@ -213,6 +206,9 @@ class NewProtocolTags(IntEnum):
     rate_select = 0x0048
     # AC outdoor silent mode (PortaSplit)
     out_silent = 0x00CD
+    error_code_query = 0x003F
+    mode_query = 0x0041
+    high_temperature_monitor = 0x0047
 
 
 class MessageACBase(MessageRequest):
@@ -306,7 +302,7 @@ class MessageQuery(MessageACBase):
         return query_body
 
 
-class MessageCapabilitiesQuery(MessageACBase):
+class CapabilitiesQuery(MessageACBase):
     """AC message capabilities query(queryType == "all_first_frame")."""
 
     def __init__(
@@ -329,7 +325,7 @@ class MessageCapabilitiesQuery(MessageACBase):
         return bytearray([0x01, 0x00])
 
 
-class MessageCapabilitiesAdditionalQuery(MessageCapabilitiesQuery):
+class CapabilitiesAdditionalQuery(CapabilitiesQuery):
     """AC message capabilities additional query(queryType == "all_second_frame")."""
 
     def __init__(
@@ -343,7 +339,7 @@ class MessageCapabilitiesAdditionalQuery(MessageCapabilitiesQuery):
         )
 
 
-class MessageGroupDataQuery(MessageACBase):
+class GroupDataQuery(MessageACBase):
     """AC message group data query(queryType == "group_data_<group>")."""
 
     _group = 0
@@ -370,43 +366,43 @@ class MessageGroupDataQuery(MessageACBase):
         return body
 
 
-class MessageGroupZeroQuery(MessageGroupDataQuery):
+class GroupZeroQuery(GroupDataQuery):
     """AC message power query(queryType == "group_data_zero")."""
 
     _group = 0
 
 
-class MessageGroupOneQuery(MessageGroupDataQuery):
+class GroupOneQuery(GroupDataQuery):
     """AC message compressor query(queryType == "group_data_one")."""
 
     _group = 1
 
 
-class MessageGroupTwoQuery(MessageGroupDataQuery):
+class GroupTwoQuery(GroupDataQuery):
     """AC message indoor fan query(queryType == "group_data_two")."""
 
     _group = 2
 
 
-class MessagePowerQuery(MessageGroupDataQuery):
+class PowerQuery(GroupDataQuery):
     """AC message power query(queryType == "group_data_four")."""
 
     _group = 4
 
 
-class MessageHumidityQuery(MessageGroupDataQuery):
+class HumidityQuery(GroupDataQuery):
     """AC message query indoor humidity(queryType == "group_data_five")."""
 
     _group = 5
 
 
-class MessageGroupSevenQuery(MessageGroupDataQuery):
+class GroupSevenQuery(GroupDataQuery):
     """AC message compressor power query(queryType == "group_data_seven")."""
 
     _group = 7
 
 
-class MessageToggleDisplay(MessageACBase):
+class ToggleDisplay(MessageACBase):
     """AC message toggle display."""
 
     def __init__(self, protocol_version: int) -> None:
@@ -446,7 +442,7 @@ class MessageToggleDisplay(MessageACBase):
         )
 
 
-class MessageNewProtocolQuery(MessageACBase):
+class NewProtocolQuery(MessageACBase):
     """AC message new protocol query."""
 
     _query_params: tuple[int, ...] = (
@@ -460,7 +456,7 @@ class MessageNewProtocolQuery(MessageACBase):
         NewProtocolTags.wind_ud_angle,
         NewProtocolTags.out_silent,
         NewProtocolTags.buzzer_all,
-        NewProtocolQuery.error_code_query,
+        NewProtocolTags.error_code_query,
     )
 
     def __init__(
@@ -496,7 +492,7 @@ class MessageNewProtocolQuery(MessageACBase):
         return _body
 
 
-class MessageNewProtocolSelfCleanQuery(MessageNewProtocolQuery):
+class NewProtocolSelfCleanQuery(NewProtocolQuery):
     """AC message new protocol self-clean query.
 
     A device answers with an empty parameter list when a query carries a tag it
@@ -552,7 +548,7 @@ class MessageSubProtocol(MessageACBase):
         return _body
 
 
-class MessageSubProtocolQuery(MessageSubProtocol):
+class SubProtocolQuery(MessageSubProtocol):
     """AC message sub protocol query."""
 
     def __init__(
@@ -568,7 +564,7 @@ class MessageSubProtocolQuery(MessageSubProtocol):
         )
 
 
-class MessageSubProtocolQuery10(MessageSubProtocolQuery):
+class SubProtocolQuery10(SubProtocolQuery):
     """AC sub protocol indoor status query."""
 
     def __init__(self, protocol_version: int) -> None:
@@ -576,7 +572,7 @@ class MessageSubProtocolQuery10(MessageSubProtocolQuery):
         super().__init__(protocol_version, ListTypes.X10)
 
 
-class MessageSubProtocolQuery11(MessageSubProtocolQuery):
+class SubProtocolQuery11(SubProtocolQuery):
     """AC sub protocol basic status query."""
 
     def __init__(self, protocol_version: int) -> None:
@@ -584,7 +580,7 @@ class MessageSubProtocolQuery11(MessageSubProtocolQuery):
         super().__init__(protocol_version, ListTypes.X11)
 
 
-class MessageSubProtocolQuery30(MessageSubProtocolQuery):
+class SubProtocolQuery30(SubProtocolQuery):
     """AC sub protocol outdoor status query."""
 
     def __init__(self, protocol_version: int) -> None:
@@ -676,7 +672,7 @@ class MessageSubProtocolSet(MessageSubProtocol):
         )
 
 
-class MessageSubProtocolFreshAirSet(MessageSubProtocol):
+class SubProtocolFreshAirSet(MessageSubProtocol):
     """AC BB C0/02 single-control fresh-air command."""
 
     def __init__(
@@ -727,7 +723,7 @@ class MessageSubProtocolFreshAirSet(MessageSubProtocol):
         return body
 
 
-class MessageGeneralSet(MessageACBase):
+class MessageSet(MessageACBase):
     """AC message general set."""
 
     def __init__(self, protocol_version: int) -> None:
@@ -823,7 +819,7 @@ class MessageGeneralSet(MessageACBase):
         )
 
 
-class MessageNewProtocolSet(MessageACBase):
+class NewProtocolSet(MessageACBase):
     """AC message new protocol set."""
 
     def __init__(self, protocol_version: int) -> None:
@@ -971,7 +967,7 @@ class MessageNewProtocolSet(MessageACBase):
         return payload
 
 
-class XA0MessageBody(MessageBody):
+class XA0Body(MessageBody):
     """AC A0 message body."""
 
     def __init__(self, body: bytearray) -> None:
@@ -1048,7 +1044,7 @@ class XMessageBody(MessageBody):
         return int(temp_integer) + decimal * 0.1
 
 
-class XA1MessageBody(XMessageBody):
+class XA1Body(XMessageBody):
     """AC A1 message body."""
 
     def __init__(self, body: bytearray) -> None:
@@ -1066,17 +1062,16 @@ class XA1MessageBody(XMessageBody):
         self.indoor_humidity = body[17] if body[17] != 0 else None
 
 
-class XBXMessageBody(NewProtocolMessageBody):
-    """AC BX message body. body[0] b0/b1, body[1] propertyNumber, cursor 2."""
+class PropertiesBody(NewProtocolMessageBody):
+    """AC Bx message body. body[0] b0/b1, body[1] propertyNumber, cursor 2."""
 
     def __init__(
         self,
         body: bytearray,
-        bt: int,
         new_protocol_temperature: bool = False,
     ) -> None:
         """Initialize AC BX message body."""
-        super().__init__(body, bt)
+        super().__init__(body)
 
         params = self.parse()
         if NewProtocolTags.indirect_wind in params:
@@ -1113,9 +1108,9 @@ class XBXMessageBody(NewProtocolMessageBody):
             self.out_silent = params[NewProtocolTags.out_silent][0] == OUT_SILENT_VALUE
         if NewProtocolTags.buzzer_all in params:
             self.sound = params[NewProtocolTags.buzzer_all][0] > 0
-        if NewProtocolQuery.error_code_query in params:
-            self.error_code = params[NewProtocolQuery.error_code_query][0]
-        if NewProtocolTags.self_clean in params and bt != ListTypes.B5:
+        if NewProtocolTags.error_code_query in params:
+            self.error_code = params[NewProtocolTags.error_code_query][0]
+        if NewProtocolTags.self_clean in params and self.body_type != ListTypes.B5:
             # A B5 body carries this tag as a capability flag (always 1 when the
             # model supports self-clean), so only B0/B1 bodies report live state.
             self.self_clean_active: bool = params[NewProtocolTags.self_clean][0] > 0
@@ -1185,12 +1180,12 @@ class XBXMessageBody(NewProtocolMessageBody):
         return True
 
 
-class XB5MessageBody(NewProtocolMessageBody):
-    """AC B5 message body. body[0] b5, body[1] propertyNumber, cursor 2."""
+class CapabilityBody(NewProtocolMessageBody):
+    """AC B5 capability response body. body[0] b5, body[1] propertyNumber."""
 
-    def __init__(self, body: bytearray, bt: int) -> None:
-        """Initialize AC BX message body."""
-        super().__init__(body, bt)
+    def __init__(self, body: bytearray) -> None:
+        """Initialize AC B5 capability response message body."""
+        super().__init__(body)
 
         params = self.parse()
         # parse b5 protocol, github issue https://github.com/wuwentao/midea_ac_lan/issues/673
@@ -1272,7 +1267,7 @@ class XB5MessageBody(NewProtocolMessageBody):
         self.capabilities = caps
 
 
-class XC0MessageBody(XMessageBody):
+class StateBody(XMessageBody):
     """AC C0 message body."""
 
     def __init__(self, body: bytearray) -> None:
@@ -1335,7 +1330,7 @@ class XC0MessageBody(XMessageBody):
             self.fresh_filter_timeout = (body[13] & 0x40) >> 6
 
 
-class XC1MessageBody(MessageBody):
+class GroupBody(MessageBody):
     """AC C1 message body."""
 
     def __init__(self, body: bytearray, analysis_method: int = 3) -> None:
@@ -1490,7 +1485,7 @@ class XC1MessageBody(MessageBody):
         return cls.parse_value(analysis_method, databytes) / divisor
 
 
-class XBBMessageBody(MessageBody):
+class SubProtocolBody(MessageBody):
     """AC BB message body."""
 
     def __init__(self, body: bytearray) -> None:
@@ -1595,16 +1590,27 @@ class MessageACResponse(MessageResponse):
         super().__init__(message)
         # dataType 0x05 and messageBytes[0] 0xA0
         if self.message_type == MessageType.notify2 and self.body_type == ListTypes.A0:
-            self.set_body(XA0MessageBody(super().body))
+            self.set_body(XA0Body(super().body))
         # dataType 0x04 and messageBytes[0] 0xA1
+        elif (
+            self.message_type == MessageType.notify1
+            and self.body_type == ListTypes.A1
+            and len(super().body) >= A1_MIN_BODY_LENGTH
+        ):
+            self.set_body(XA1Body(super().body))
         elif (
             self.message_type == MessageType.notify1 and self.body_type == ListTypes.A1
         ):
-            self.set_body(XA1MessageBody(super().body))
-        # parse MessageCapabilitiesQuery/MessageCapabilitiesAdditionalQuery response
+            _LOGGER.debug(
+                "Skipping notify1 A1 body too short to parse (%d < %d bytes): %s",
+                len(super().body),
+                A1_MIN_BODY_LENGTH,
+                super().body.hex(),
+            )
+        # parse CapabilitiesQuery/CapabilitiesAdditionalQuery response
         # dataType 0x03 and messageBytes[0] 0xB5
         elif self.message_type == MessageType.query and self.body_type == ListTypes.B5:
-            self.set_body(XB5MessageBody(super().body, self.body_type))
+            self.set_body(CapabilityBody(super().body))
         # dataType 0x05 and messageBytes[0] 0xB5
         # dataType 0x02 and messageBytes[0] 0xB0 (set result Unidentified protocol)
         # dataType 0x03 and messageBytes[0] 0xB1
@@ -1614,7 +1620,7 @@ class MessageACResponse(MessageResponse):
             MessageType.notify2,
         ] and self.body_type in [ListTypes.B0, ListTypes.B1, ListTypes.B5]:
             self.set_body(
-                XBXMessageBody(super().body, self.body_type, new_protocol_temperature),
+                PropertiesBody(super().body, new_protocol_temperature),
             )
         # dataType 0x02 and messageBytes[0] 0xC0
         # dataType 0x03 and messageBytes[0] 0xC0
@@ -1622,10 +1628,10 @@ class MessageACResponse(MessageResponse):
             self.message_type in [MessageType.query, MessageType.set]
             and self.body_type == ListTypes.C0
         ):
-            self.set_body(XC0MessageBody(super().body))
+            self.set_body(StateBody(super().body))
         # messageBytes[0] 0xC1
         elif self.message_type == MessageType.query and self.body_type == ListTypes.C1:
-            self.set_body(XC1MessageBody(super().body, power_analysis_method))
+            self.set_body(GroupBody(super().body, power_analysis_method))
         elif (
             self.message_type
             in [MessageType.set, MessageType.query, MessageType.notify2]
@@ -1633,6 +1639,6 @@ class MessageACResponse(MessageResponse):
             and len(super().body) >= BB_MIN_BODY_LENGTH
         ):
             self.used_subprotocol = True
-            self.set_body(XBBMessageBody(super().body))
+            self.set_body(SubProtocolBody(super().body))
 
         self.set_attr()

@@ -11,10 +11,10 @@ from midealan.device import MideaDevice, MideaDeviceInitKwargs
 
 from .message import (
     MessageE2Response,
-    MessageNewProtocolSet,
     MessagePower,
     MessageQuery,
     MessageSet,
+    NewProtocolSet,
 )
 
 
@@ -221,7 +221,7 @@ class MideaE2Device(MideaDevice):
 
     def set_attribute(self, attr: str, value: bool | float | str) -> None:
         """Midea E2 device set attribute."""
-        message: MessagePower | MessageSet | MessageNewProtocolSet | None = None
+        message: MessagePower | MessageSet | NewProtocolSet | None = None
         if attr not in [
             DeviceAttributes.heating,
             DeviceAttributes.keep_warm,
@@ -235,9 +235,24 @@ class MideaE2Device(MideaDevice):
                 message.power = bool(value)
             elif old_protocol == OldProtocol.true:
                 message = self.make_message_set()
+                if not hasattr(message, str(attr)):
+                    # MessageSet only carries protection, whole_tank_heating,
+                    # target_temperature and variable_heating. setattr() would
+                    # happily create an unused attribute and the message would
+                    # be sent without the requested change, so the command is
+                    # silently lost. Ignore it instead, and tell the user how
+                    # to opt in to the new protocol if the device supports it.
+                    _LOGGER.warning(
+                        "[%s] Attribute %s is not supported by the old protocol "
+                        "and was ignored. If your device supports the new "
+                        'protocol, set customize to {"old_protocol": false}.',
+                        self.device_id,
+                        attr,
+                    )
+                    return
                 setattr(message, str(attr), value)
             else:
-                message = MessageNewProtocolSet(self._message_protocol_version)
+                message = NewProtocolSet(self._message_protocol_version)
                 setattr(message, str(attr), value)
             self.build_send(message)
 
