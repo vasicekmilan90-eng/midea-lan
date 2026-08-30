@@ -621,6 +621,249 @@ class TestMideaDevice:
             self.device._socket = socket_mock
             self.device.refresh_status(True)
 
+    def test_build_init_query_prepended_before_status_queries(self) -> None:
+        """Init queries run after the appliance query and before status queries.
+
+        build_init_query() (e.g. AC's one-shot B5 capability probes) must be
+        prepended ahead of build_query() so their replies are processed before
+        the recurring status queries, but still after the appliance query.
+        """
+        socket_mock = MagicMock()
+        init_cmd = MagicMock(name="init_cmd")
+        real_cmd = MagicMock(name="real_cmd")
+        init_cmd.__class__.__name__ = "InitQuery"
+        real_cmd.__class__.__name__ = "StatusQuery"
+        sent: list[object] = []
+
+        def parse(_msg: bytes) -> MessageResult:
+            # The appliance reply is what clears _appliance_query in production
+            # (via pre_process_message); model that so the init stage is armed.
+            if sent and sent[-1].__class__.__name__ == "MessageQueryAppliance":
+                self.device._appliance_query = False
+            return MessageResult.SUCCESS
+
+        with (
+            patch.object(self.device, "build_query", return_value=[real_cmd]),
+            patch.object(self.device, "build_init_query", return_value=[init_cmd]),
+            patch.object(socket_mock, "recv", side_effect=[bytearray([0x0])] * 3),
+            patch.object(
+                self.device,
+                "build_send",
+                side_effect=lambda cmd, query=False: sent.append(cmd),  # noqa: ARG005
+            ),
+            patch.object(self.device, "parse_message", side_effect=parse),
+        ):
+            self.device._socket = socket_mock
+            assert self.device._appliance_query is True
+            self.device.refresh_status(True)
+
+        # appliance query first, then the init query, then the status query.
+        assert sent[0].__class__.__name__ == "MessageQueryAppliance"
+        assert sent[1] is init_cmd
+        assert sent[2] is real_cmd
+
+    def test_unresolved_appliance_query_skips_init_probes(self) -> None:
+        """A failed appliance query must not arm the init/capability probes.
+
+        The init probes (e.g. AC B5 capability queries) need the message
+        protocol version the appliance reply reports. If the appliance query
+        times out, _appliance_query stays True and the version is unresolved, so
+        the checked pass must advance straight to build_query() rather than probe
+        with a stale version -- a probe timing out here would be blacklisted for
+        the whole connection, costing capability discovery on a device whose
+        status queries work.
+        """
+        socket_mock = MagicMock()
+        init_cmd = MagicMock(name="init_cmd")
+        real_cmd = MagicMock(name="real_cmd")
+        init_cmd.__class__.__name__ = "InitQuery"
+        real_cmd.__class__.__name__ = "StatusQuery"
+        sent: list[object] = []
+
+        # Appliance query times out (no reply clears _appliance_query), then the
+        # status query answers.
+        with (
+            patch.object(self.device, "build_query", return_value=[real_cmd]),
+            patch.object(self.device, "build_init_query", return_value=[init_cmd]),
+            patch.object(
+                socket_mock,
+                "recv",
+                side_effect=[TimeoutError(), bytearray([0x0])],
+            ),
+            patch.object(
+                self.device,
+                "build_send",
+                side_effect=lambda cmd, query=False: sent.append(cmd),  # noqa: ARG005
+            ),
+            patch.object(
+                self.device,
+                "parse_message",
+                side_effect=[MessageResult.SUCCESS],
+            ),
+        ):
+            self.device._socket = socket_mock
+            assert self.device._appliance_query is True
+            self.device.refresh_status(True)
+
+        # appliance query, then straight to the status query -- no init probe.
+        assert sent[0].__class__.__name__ == "MessageQueryAppliance"
+        assert init_cmd not in sent
+        assert sent[1] is real_cmd
+        # _appliance_query is still armed for the next connect-time probe.
+        assert self.device._appliance_query is True
+
+    def test_followup_init_query_spliced_into_checked_pass(self) -> None:
+        """A reply that arms a follow-up init query gets it validated in-pass.
+
+        The AC additional-capability probe is armed only after the basic frame's
+        reply, i.e. after the command list was built. It must be sent and
+        validated inside the same check_protocol pass, not deferred to an
+        unchecked refresh where a timeout could never blacklist it.
+        """
+        socket_mock = MagicMock()
+        self.device._appliance_query = False
+
+        class _Basic:
+            pass
+
+        class _Additional:
+            pass
+
+        basic = _Basic()
+        additional = _Additional()
+        real_cmd = MagicMock(name="real_cmd")
+        real_cmd.__class__.__name__ = "StatusQuery"
+        # Arm the follow-up only after the basic probe's reply is processed.
+        armed = {"additional": False}
+        sent: list[object] = []
+
+        def build_init() -> list[object]:
+            return [additional] if armed["additional"] else [basic]
+
+        def parse(_msg: bytes) -> MessageResult:
+            if sent and isinstance(sent[-1], _Basic):
+                armed["additional"] = True
+            return MessageResult.SUCCESS
+
+        with (
+            patch.object(self.device, "build_query", return_value=[real_cmd]),
+            patch.object(self.device, "build_init_query", side_effect=build_init),
+            patch.object(socket_mock, "recv", side_effect=[bytearray([0x0])] * 3),
+            patch.object(
+                self.device,
+                "build_send",
+                side_effect=lambda cmd, query=False: sent.append(cmd),  # noqa: ARG005
+            ),
+            patch.object(self.device, "parse_message", side_effect=parse),
+        ):
+            self.device._socket = socket_mock
+            self.device.refresh_status(True)
+
+        # basic probe, then the spliced additional probe, then the status query.
+        assert sent[0] is basic
+        assert sent[1] is additional
+        assert sent[2] is real_cmd
+
+    def test_followup_init_query_blacklisted_on_timeout(self) -> None:
+        """An armed follow-up probe that times out is recorded, not re-sent.
+
+        Once the additional probe is spliced in and times out during the checked
+        pass, it lands in _unsupported_protocol, so it is never queued again even
+        though build_init_query() keeps reporting it as armed.
+        """
+        socket_mock = MagicMock()
+        self.device._appliance_query = False
+
+        class _Basic:
+            pass
+
+        class _Additional:
+            pass
+
+        basic = _Basic()
+        additional = _Additional()
+        real_cmd = MagicMock(name="real_cmd")
+        real_cmd.__class__.__name__ = "StatusQuery"
+        armed = {"additional": False}
+        sent: list[object] = []
+
+        def build_init() -> list[object]:
+            return [additional] if armed["additional"] else [basic]
+
+        def parse(_msg: bytes) -> MessageResult:
+            if sent and isinstance(sent[-1], _Basic):
+                armed["additional"] = True
+            return MessageResult.SUCCESS
+
+        # basic reply succeeds, additional probe times out, status query succeeds.
+        with (
+            patch.object(self.device, "build_query", return_value=[real_cmd]),
+            patch.object(self.device, "build_init_query", side_effect=build_init),
+            patch.object(
+                socket_mock,
+                "recv",
+                side_effect=[bytearray([0x0]), TimeoutError(), bytearray([0x0])],
+            ),
+            patch.object(
+                self.device,
+                "build_send",
+                side_effect=lambda cmd, query=False: sent.append(cmd),  # noqa: ARG005
+            ),
+            patch.object(self.device, "parse_message", side_effect=parse),
+        ):
+            self.device._socket = socket_mock
+            self.device.refresh_status(True)  # must not raise (real query answered)
+
+        assert "_Additional" in self.device._unsupported_protocol
+        # Sent exactly once despite still being reported as armed.
+        assert sum(isinstance(c, _Additional) for c in sent) == 1
+
+    def test_blacklisted_init_query_still_advances_stage_in_checked_pass(self) -> None:
+        """A skipped (already-unsupported) init stage still advances to the next.
+
+        When an init query is already in _unsupported_protocol its send is
+        skipped, but its stage is still resolved: the checked pass must build and
+        send the next stage (the status queries) rather than stalling on the
+        skipped command.
+        """
+        socket_mock = MagicMock()
+        self.device._appliance_query = False
+
+        class _Init:
+            pass
+
+        init_cmd = _Init()
+        self.device._unsupported_protocol = ["_Init"]
+        real_cmd = MagicMock(name="real_cmd")
+        real_cmd.__class__.__name__ = "StatusQuery"
+        armed = {"init": True}
+        sent: list[object] = []
+
+        def build_init() -> list[object]:
+            return [init_cmd] if armed["init"] else []
+
+        with (
+            patch.object(self.device, "build_query", return_value=[real_cmd]),
+            patch.object(self.device, "build_init_query", side_effect=build_init),
+            patch.object(socket_mock, "recv", side_effect=[bytearray([0x0])]),
+            patch.object(
+                self.device,
+                "build_send",
+                side_effect=lambda cmd, query=False: sent.append(cmd),  # noqa: ARG005
+            ),
+            patch.object(
+                self.device,
+                "parse_message",
+                side_effect=[MessageResult.SUCCESS],
+            ),
+        ):
+            self.device._socket = socket_mock
+            self.device.refresh_status(True)
+
+        # The skipped init query is never sent, but the status stage still runs.
+        assert init_cmd not in sent
+        assert sent == [real_cmd]
+
     def test_run_loop_reconnects_when_no_protocol_is_supported(self) -> None:
         """NoSupportedProtocol must drop the socket, like every other error here.
 
@@ -769,6 +1012,31 @@ class TestMideaDevice:
             self.device.refresh_status()
 
         build_send_mock.assert_called_once_with(cmd, query=True)
+
+    def test_unchecked_refresh_skips_unsupported_query_without_advancing(self) -> None:
+        """An unchecked refresh skips an unsupported query and sends the rest.
+
+        With check_protocol=False no reply is awaited inline, so a command in
+        _unsupported_protocol takes the SKIP branch and does not trigger a stage
+        advance -- the periodic refresh must simply pass over it and still send
+        the remaining, supported query.
+        """
+        supported = type("Supported", (), {})()
+        unsupported = type("Unsupported", (), {})()
+        self.device._appliance_query = False
+        self.device._unsupported_protocol = ["Unsupported"]
+        with (
+            patch.object(
+                self.device,
+                "build_query",
+                return_value=[unsupported, supported],
+            ),
+            patch.object(self.device, "build_send") as build_send_mock,
+        ):
+            self.device.refresh_status()
+
+        # Only the supported query is sent; the unsupported one is skipped.
+        build_send_mock.assert_called_once_with(supported, query=True)
 
     def test_parse_message(self) -> None:
         """Test parse message."""
