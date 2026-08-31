@@ -2,8 +2,8 @@
 
 from enum import IntEnum
 
-from midealocal.const import DeviceType
-from midealocal.message import (
+from midealan.const import DeviceType
+from midealan.message import (
     ListTypes,
     MessageBody,
     MessageRequest,
@@ -59,25 +59,6 @@ class C3DeviceMode(IntEnum):
 
     COOL = 2
     HEAT = 3
-
-
-class C3FanSpeed(IntEnum):
-    """C3 outdoor unit fan speed levels.
-
-    Values correspond to raw_byte * 10 (parser scales
-    ``body[data_offset + 3]`` by 10 to expose these values).
-    Exact naming for level 1..4 is not confirmed by any publicly
-    available documentation for the Galmet Prima 06 GT model - kept
-    generic until an authoritative source is available.
-    """
-
-    # OFF added after field verification against wired HMI:
-    # compressor idle -> raw byte 0 (which fell back to LEVEL_2).
-    OFF = 0
-    LEVEL_1 = 10
-    LEVEL_2 = 20
-    LEVEL_3 = 30
-    LEVEL_4 = 40
 
 
 class C3UnitRunMode(IntEnum):
@@ -554,19 +535,18 @@ class C3UnitParaBody(MessageBody):
         """Initialize C3 UnitPara message body."""
         super().__init__(body)
         self.comp_run_freq = body[data_offset]
+        # Always publish a lowercase string (or None for an unknown code) so the
+        # value never alternates between str and int for consumers.
         _umr_raw = body[data_offset + 1]
         try:
             self.unit_mode_run = C3UnitRunMode(_umr_raw).name.lower()
         except ValueError:
-            self.unit_mode_run = _umr_raw
-        # NOTE: correlation vs wired HMI (Aug-16 pump test) shows fan RPM is
-        # located at body[data_offset + 2] * 10 (not +3). Kept +3 as legacy
-        # attribute name for backward compat.
-        _fs_raw = body[data_offset + 2] * 10
-        try:
-            self.fan_speed = C3FanSpeed(_fs_raw).name.lower()
-        except ValueError:
-            self.fan_speed = _fs_raw
+            self.unit_mode_run = None
+        # Outdoor fan speed lives at body[data_offset + 2] (see wuwentao/midea-lan#51),
+        # and the byte is RPM/10, not a level index. Always publish an int so
+        # downstream numeric sensors never see a type change: an idle fan is 0,
+        # not the string "off".
+        self.fan_speed = body[data_offset + 2] * 10
         self.fg_capacity_need = body[data_offset + 5]
         # Compressor current in A (verified against wired HMI Aug-16, raw=A)
         self.compressor_current = body[data_offset + 4]
