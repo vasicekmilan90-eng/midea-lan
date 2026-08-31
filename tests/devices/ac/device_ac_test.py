@@ -17,7 +17,6 @@ from midealan.devices.ac.message import (
     HumidityQuery,
     MessageQuery,
     NewProtocolQuery,
-    NewProtocolSelfCleanQuery,
     NewProtocolTags,
     PowerFormats,
     PowerQuery,
@@ -324,18 +323,18 @@ class TestMideaACDevice:
 
         self.device._used_subprotocol = False
         queries = self.device.build_query()
-        # Capability queries are no longer part of the recurring status cycle;
-        # they are returned by build_init_query() instead.
-        assert len(queries) == 9
+        # The new-protocol query and self-clean query are now a single merged
+        # NewProtocolQuery. Capability queries are no longer part of the
+        # recurring status cycle; they are returned by build_init_query().
+        assert len(queries) == 8
         assert isinstance(queries[0], MessageQuery)
         assert isinstance(queries[1], NewProtocolQuery)
-        assert isinstance(queries[2], NewProtocolSelfCleanQuery)
-        assert isinstance(queries[3], PowerQuery)
-        assert isinstance(queries[4], HumidityQuery)
-        assert isinstance(queries[5], GroupZeroQuery)
-        assert isinstance(queries[6], GroupOneQuery)
-        assert isinstance(queries[7], GroupTwoQuery)
-        assert isinstance(queries[8], GroupSevenQuery)
+        assert isinstance(queries[2], PowerQuery)
+        assert isinstance(queries[3], HumidityQuery)
+        assert isinstance(queries[4], GroupZeroQuery)
+        assert isinstance(queries[5], GroupOneQuery)
+        assert isinstance(queries[6], GroupTwoQuery)
+        assert isinstance(queries[7], GroupSevenQuery)
         assert not any(
             isinstance(q, CapabilitiesQuery | CapabilitiesAdditionalQuery)
             for q in queries
@@ -370,22 +369,118 @@ class TestMideaACDevice:
         self.device._capability_addition_query = True
         assert self.device.build_init_query() == []
 
-    def test_build_query_omits_rate_select_until_capability_confirmed(self) -> None:
-        """Test rate_select stays out of the B1 query until b5_electricity confirms it.
+    def test_build_query_omits_optional_tags_until_capability_confirmed(self) -> None:
+        """Test optional tags stay out of the B1 query until capabilities confirm them.
 
         Before any B5 capabilities response is seen, `_capabilities` is empty, so
-        the query built for the device must not ask for rate_select.
+        the query built for the device must not ask for rate_select or self_clean.
         """
         self.device._used_subprotocol = False
         assert self.device.capabilities == {}
         queries = self.device.build_query()
         new_protocol_query = next(q for q in queries if isinstance(q, NewProtocolQuery))
         assert NewProtocolTags.rate_select not in new_protocol_query._body
+        assert NewProtocolTags.self_clean not in new_protocol_query._body
 
         self.device._capabilities["rate_select"] = True
+        self.device._capabilities["self_clean"] = True
         queries = self.device.build_query()
         new_protocol_query = next(q for q in queries if isinstance(q, NewProtocolQuery))
         assert NewProtocolTags.rate_select in new_protocol_query._body
+        assert NewProtocolTags.self_clean in new_protocol_query._body
+
+    def test_customize_capabilities_override_query_and_property(self) -> None:
+        """Test a customize capabilities entry forces an optional tag on.
+
+        A user can enable a feature the B5 query never advertised; the merged
+        capabilities property and the B1 query both reflect the override.
+        """
+        self.device._used_subprotocol = False
+        self.device.set_customize('{"capabilities": {"self_clean": true}}')
+        assert self.device.capabilities["self_clean"] is True
+        queries = self.device.build_query()
+        new_protocol_query = next(q for q in queries if isinstance(q, NewProtocolQuery))
+        assert NewProtocolTags.self_clean in new_protocol_query._body
+
+    def test_customize_capabilities_disable_overrides_reported_value(self) -> None:
+        """Test a customize false value overrides a B5-reported capability."""
+        self.device._used_subprotocol = False
+        self.device._capabilities["rate_select"] = 2
+        self.device.set_customize('{"capabilities": {"rate_select": false}}')
+        assert self.device.capabilities["rate_select"] is False
+        queries = self.device.build_query()
+        new_protocol_query = next(q for q in queries if isinstance(q, NewProtocolQuery))
+        assert NewProtocolTags.rate_select not in new_protocol_query._body
+
+    def test_customize_capabilities_reset_when_absent(self) -> None:
+        """Test customize capabilities clear when a later customize omits them."""
+        self.device.set_customize('{"capabilities": {"self_clean": true}}')
+        assert self.device._customize_capabilities == {"self_clean": True}
+        self.device.set_customize('{"temperature_step": 1}')
+        assert self.device._customize_capabilities == {}
+
+    def test_customize_capabilities_ignores_non_dict(self) -> None:
+        """Test a non-dict capabilities value is ignored, not applied."""
+        self.device.set_customize('{"capabilities": "self_clean"}')
+        assert self.device._customize_capabilities == {}
+
+    def test_customize_capabilities_override_priority(self) -> None:
+        """Test customize override wins when both B5 and customize set the same key.
+
+        When _capabilities and _customize_capabilities both have a key, the
+        merged capabilities property must return the customize value (higher
+        priority), ensuring users can correct wrong B5 reports.
+        """
+        self.device._capabilities["rate_select"] = 1
+        self.device._capabilities["self_clean"] = False
+        self.device.set_customize(
+            '{"capabilities": {"rate_select": 2, "self_clean": true}}',
+        )
+        merged = self.device.capabilities
+        assert merged["rate_select"] == 2  # customize wins over B5 value 1
+        assert merged["self_clean"] is True  # customize wins over B5 value False
+
+    def test_customize_capabilities_publishes_event_on_enable(self) -> None:
+        """Test set_customize emits a capabilities event when enabling an override.
+
+        When set_customize applies a capability override, it must notify listeners
+        (e.g., Home Assistant) via update_all so they see the merged capabilities
+        immediately, not after the next B5 query (which is one-shot).
+        """
+        with patch.object(self.device, "update_all") as update_all_mock:
+            self.device.set_customize('{"capabilities": {"self_clean": true}}')
+            # Verify update_all was called with the merged capabilities dict
+            calls = [call.args[0] for call in update_all_mock.call_args_list]
+            # Should have at least one call with capabilities key
+            capabilities_updates = [c for c in calls if "capabilities" in c]
+            assert len(capabilities_updates) > 0
+            # The published capabilities should include the override
+            published_caps = capabilities_updates[-1]["capabilities"]
+            assert published_caps["self_clean"] is True
+
+    def test_customize_capabilities_publishes_event_on_clear(self) -> None:
+        """Test set_customize emits a capabilities event when clearing overrides.
+
+        When set_customize is called with no capabilities key (or empty customize),
+        it resets _customize_capabilities to {}. This must still publish the merged
+        capabilities so listeners know the overrides are gone and the effective map
+        has reverted to B5-only values.
+        """
+        # First set an override
+        self.device.set_customize('{"capabilities": {"rate_select": 3}}')
+        assert self.device._customize_capabilities == {"rate_select": 3}
+        # Now clear it by calling set_customize with no capabilities key
+        with patch.object(self.device, "update_all") as update_all_mock:
+            self.device.set_customize('{"temperature_step": 1}')
+            # Verify update_all was called with capabilities
+            calls = [call.args[0] for call in update_all_mock.call_args_list]
+            capabilities_updates = [c for c in calls if "capabilities" in c]
+            assert len(capabilities_updates) > 0
+            # The published capabilities should not have rate_select override
+            published_caps = capabilities_updates[-1]["capabilities"]
+            assert "rate_select" not in published_caps or not published_caps.get(
+                "rate_select",
+            )
 
     def test_bb_model_builds_distinct_queries_and_attributes(self) -> None:
         """Test verified BB model starts with independent BB queries."""
