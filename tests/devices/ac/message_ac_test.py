@@ -1,5 +1,7 @@
 """Test ac message."""
 
+import logging
+
 import pytest
 
 from midealan.const import ProtocolVersion
@@ -1002,40 +1004,22 @@ class TestMessageACResponse:
         """Test Message parse query B5 capabilities."""
         self.header[9] = 0x03
         body = bytearray([0xB5, 0x0B])  # Body type, params count
-        body += bytearray([0x14, 0x02, 0x01, 7])  # b5_mode
-        body += bytearray([0x15, 0x02, 0x01, 1])  # b5_wind_swing
-        body += bytearray([0x10, 0x02, 0x01, 5])  # b5_wind_speed
-        body += bytearray([0x12, 0x02, 0x01, 1])  # b5_eco
-        body += bytearray([0x1E, 0x02, 0x01, 1])  # b5_anion
-        body += bytearray([0x17, 0x02, 0x01, 1])  # b5_filter_remind
-        body += bytearray([0x1A, 0x02, 0x01, 1])  # b5_strong_wind
+        body += bytearray([0x14, 0x02, 0x01, 7])  # mode
+        body += bytearray([0x15, 0x02, 0x01, 1])  # wind_swing
+        body += bytearray([0x10, 0x02, 0x01, 5])  # wind_speed
+        body += bytearray([0x12, 0x02, 0x01, 1])  # eco
+        body += bytearray([0x1E, 0x02, 0x01, 1])  # anion
+        body += bytearray([0x17, 0x02, 0x01, 1])  # filter_remind
+        body += bytearray([0x1A, 0x02, 0x01, 1])  # strong_wind
         body += bytearray([0x25, 0x02, 0x07, 34, 60, 34, 60, 34, 60, 0])  # temperature
-        body += bytearray([0x24, 0x02, 0x01, 1])  # b5_screen_display
-        body += bytearray([0x2C, 0x02, 0x01, 1])  # b5_sound
-        body += bytearray([0x1F, 0x02, 0x01, 1])  # b5_humidity
+        # screen_display_capability
+        body += bytearray([0x24, 0x02, 0x01, 1])
+        body += bytearray([0x2C, 0x02, 0x01, 1])  # buzzer_all
+        body += bytearray([0x1F, 0x02, 0x01, 1])  # humidity
         body += bytearray(1)  # trailing checksum byte (stripped by MessageResponse)
 
         response = MessageACResponse(self.header + body)
-        assert hasattr(response, "b5_mode")
-        assert response.b5_mode == 7
-        assert hasattr(response, "b5_anion")
-        assert response.b5_anion == 1
-        assert hasattr(response, "b5_filter_remind")
-        assert response.b5_filter_remind == 1
-        assert hasattr(response, "b5_strong_wind")
-        assert response.b5_strong_wind == 1
-        assert hasattr(response, "b5_wind_speed")
-        assert response.b5_wind_speed == 5
-        assert hasattr(response, "b5_screen_display")
-        assert response.b5_screen_display == 1
-        assert hasattr(response, "b5_sound")
-        assert response.b5_sound == 1
-        assert hasattr(response, "b5_humidity")
-        assert response.b5_humidity == 1
-        assert hasattr(response, "b5_temperature0")
-        assert response.b5_temperature0 == 34
-        assert hasattr(response, "b5_temperature6")
-        assert response.b5_temperature6 == 0
+        # Temperature limits are extracted into temperature_limits attribute
         assert hasattr(response, "temperature_limits")
         assert response.temperature_limits == {
             1: (17.0, 30.0),
@@ -1044,8 +1028,10 @@ class TestMessageACResponse:
             4: (17.0, 30.0),
             5: (17.0, 30.0),
         }
+        # All capability tags are parsed into capabilities dict
         assert hasattr(response, "capabilities")
         assert response.capabilities == {
+            # Manually parsed capabilities with special logic
             "heat_mode": True,
             "cool_mode": True,
             "dry_mode": False,
@@ -1063,6 +1049,11 @@ class TestMessageACResponse:
             "turbo_cool": True,
             "turbo_heat": True,
             "display_control": True,
+            # Auto-parsed tags (raw value from first byte)
+            "filter_remind": 1,
+            "temperature": 34,
+            "buzzer_all": 1,
+            "humidity": 1,
         }
 
     def test_message_query_b5_detects_additional_capabilities(self) -> None:
@@ -1094,16 +1085,16 @@ class TestMessageACResponse:
         self,
         raw_value: int,
     ) -> None:
-        """Test b5_electricity capability exposes the raw rate level count.
+        """Test electricity capability exposes the raw rate level count.
 
-        The B5 b5_electricity byte is a rate level count, not a boolean:
+        The electricity byte is a rate level count, not a boolean:
         1 selects the 2-gear map, 2/3 select the 5-gear map, 0 means
         unsupported. The parser stores the raw value so the device layer can
         pick the right gear map.
         """
         self.header[9] = 0x03
         body = bytearray([0xB5, 0x01])  # Body type, params count
-        body += bytearray([0x16, 0x02, 0x01, raw_value])  # b5_electricity
+        body += bytearray([0x16, 0x02, 0x01, raw_value])  # electricity
         body += bytearray(1)  # trailing checksum byte (stripped by MessageResponse)
 
         response = MessageACResponse(self.header + body)
@@ -1174,6 +1165,31 @@ class TestMessageACResponse:
             "fan_auto": True,
             "fan_custom": False,
         }
+
+    def test_message_query_b5_warns_unknown_tag(
+        self,
+        caplog: pytest.LogCaptureFixture,
+    ) -> None:
+        """Test B5 capability parsing warns about unknown tags."""
+        self.header[9] = 0x03
+        body = bytearray([0xB5, 0x02])  # Body type, 2 params
+        # Add a known tag (b5_mode)
+        body += bytearray([0x14, 0x02, 0x01, 7])  # b5_mode
+        # Add an unknown B5-range tag (0x0299, not in NewProtocolTags)
+        body += bytearray([0x99, 0x02, 0x01, 0x42])
+        body += bytearray(1)  # trailing checksum byte
+
+        with caplog.at_level(logging.WARNING):
+            response = MessageACResponse(self.header + body)
+
+        # Known tag should parse
+        assert hasattr(response, "capabilities")
+        assert "heat_mode" in response.capabilities
+        # Unknown tag should trigger warning
+        assert any(
+            "Unknown capability tag" in record.message and "0x0299" in record.message
+            for record in caplog.records
+        )
 
     @pytest.mark.parametrize(
         ("raw_value", "expected"),
