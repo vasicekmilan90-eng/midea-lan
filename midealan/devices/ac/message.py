@@ -467,7 +467,7 @@ class NewProtocolQuery(MessageACBase):
         NewProtocolTags.wind_ud_angle,
         NewProtocolTags.out_silent,
         NewProtocolTags.buzzer_all,
-        NewProtocolTags.error_code_query,
+        # NewProtocolTags.error_code_query,
     )
 
     def __init__(
