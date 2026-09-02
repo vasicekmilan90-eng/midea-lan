@@ -15,14 +15,20 @@ TEMP_NEG_VALUE = 127
 # Outdoor fan speed is transmitted as RPM / 10.
 FAN_SPEED_FACTOR = 10
 
-# Error code lookup (source: official Modbus V4.7 documentation, table 1).
+# Error code lookup (source: Midea Modbus documentation V4.7,
+# 0052003044313 V.E, "Error code table 1", page 11).
 # Format: raw_value -> (display_code, human_description).
-# NOTE: 4 codes (Hd, HE, L2, L8) have ambiguous descriptions in the source
-# PDF due to two-column layout extraction - kept as "unknown" until an
-# authoritative source is available.
+# All entries below were cross-checked against that source; the four
+# codes previously marked "unknown" (Hd, HE, L2, L9) plus L8 are now
+# filled in, and three codes (E1, H9, HA) whose text had been
+# shifted from neighbouring rows during transcription are corrected.
 C3_ERROR_CODE_TABLE: dict[int, tuple[str, str]] = {
     1: ("E0", "Water flow fault (E8 displayed 3 times)"),
-    2: ("E1", "Outlet water temp. sensor for Zone 2 (Tw2) fault"),
+    2: (
+        "E1",
+        "Phase loss, or neutral and live wire connected reversely "
+        "(three-phase units only)",
+    ),
     3: ("E2", "Communication fault between controller and hydraulic module"),
     4: ("E3", "Final outlet water temp. sensor (T1) fault"),
     5: ("E4", "Water tank temp. sensor (T5) fault"),
@@ -54,11 +60,11 @@ C3_ERROR_CODE_TABLE: dict[int, tuple[str, str]] = {
     45: ("H6", "DC fan motor fault"),
     46: ("H7", "Voltage protection"),
     47: ("H8", "Pressure sensor fault"),
-    48: ("H9", "Speed difference > 15Hz between front and back clock"),
-    49: ("HA", "Speed difference > 15Hz between real and setting speed"),
+    48: ("H9", "Outlet water temp. sensor for Zone 2 (Tw2) fault"),
+    49: ("HA", "Outlet water temp. sensor (Tw_out) fault"),
     50: ("Hb", "3 times PP protection and Tw_out < 7C"),
-    52: ("Hd", "Unknown / description unclear in source document"),
-    53: ("HE", "Unknown / description unclear in source document"),
+    52: ("Hd", "Communication fault between hydraulic modules (parallel)"),
+    53: ("HE", "Communication error: main board <-> thermostat transfer board"),
     54: ("HF", "Inverter module board EEPROM fault"),
     55: ("HH", "H6 displayed 10 times in 2 hours"),
     57: ("HP", "Low pressure protection (Pe<0.6) occurred 3 times in 1 hour"),
@@ -67,12 +73,12 @@ C3_ERROR_CODE_TABLE: dict[int, tuple[str, str]] = {
     116: ("F1", "Low DC generatrix voltage protection"),
     134: ("L0", "Module protection"),
     135: ("L1", "DC generatrix low voltage protection"),
-    136: ("L2", "Unknown / description unclear in source document"),
+    136: ("L2", "DC generatrix high voltage protection"),
     138: ("L4", "MCE fault"),
     139: ("L5", "Zero speed protection"),
-    141: ("L7", "Phase sequence fault / phase loss (3-phase only)"),
-    142: ("L8", "Unknown / description unclear in source document"),
-    143: ("L9", "Unknown / description unclear in source document"),
+    141: ("L7", "Phase sequence fault"),
+    142: ("L8", "Speed difference > 15Hz between front and back clock"),
+    143: ("L9", "Speed difference > 15Hz between real and setting speed"),
 }
 
 
