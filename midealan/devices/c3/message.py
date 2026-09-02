@@ -26,8 +26,10 @@ C3_ERROR_CODE_TABLE: dict[int, tuple[str, str]] = {
     1: ("E0", "Water flow fault (E8 displayed 3 times)"),
     2: (
         "E1",
-        "Phase loss, or neutral and live wire connected reversely "
-        "(three-phase units only)",
+        (
+            "Phase loss, or neutral and live wire connected reversely "
+            "(three-phase units only)"
+        ),
     ),
     3: ("E2", "Communication fault between controller and hydraulic module"),
     4: ("E3", "Final outlet water temp. sensor (T1) fault"),

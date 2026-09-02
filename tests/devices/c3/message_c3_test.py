@@ -984,8 +984,10 @@ class TestC3ErrorCodeDescription:
         [
             (
                 2,
-                "E1: Phase loss, or neutral and live wire connected reversely "
-                "(three-phase units only)",
+                (
+                    "E1: Phase loss, or neutral and live wire connected reversely "
+                    "(three-phase units only)"
+                ),
             ),
             (48, "H9: Outlet water temp. sensor for Zone 2 (Tw2) fault"),
             (49, "HA: Outlet water temp. sensor (Tw_out) fault"),
