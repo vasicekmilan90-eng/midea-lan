@@ -978,3 +978,59 @@ class TestC3ErrorCodeDescription:
 
         assert response.error_code == 200
         assert response.error_code_description == "Unknown code (raw=200)"
+
+    @pytest.mark.parametrize(
+        ("error_code", "expected_description"),
+        [
+            (
+                2,
+                "E1: Phase loss, or neutral and live wire connected reversely "
+                "(three-phase units only)",
+            ),
+            (48, "H9: Outlet water temp. sensor for Zone 2 (Tw2) fault"),
+            (49, "HA: Outlet water temp. sensor (Tw_out) fault"),
+            (
+                52,
+                "Hd: Communication fault between hydraulic modules (parallel)",
+            ),
+            (
+                53,
+                "HE: Communication error: main board <-> thermostat transfer board",
+            ),
+            (136, "L2: DC generatrix high voltage protection"),
+            (141, "L7: Phase sequence fault"),
+            (142, "L8: Speed difference > 15Hz between front and back clock"),
+            (143, "L9: Speed difference > 15Hz between real and setting speed"),
+        ],
+        ids=[
+            "raw_2_E1",
+            "raw_48_H9",
+            "raw_49_HA",
+            "raw_52_Hd",
+            "raw_53_HE",
+            "raw_136_L2",
+            "raw_141_L7",
+            "raw_142_L8",
+            "raw_143_L9",
+        ],
+    )
+    def test_error_code_corrected_entries_match_source_pdf(
+        self,
+        error_code: int,
+        expected_description: str,
+    ) -> None:
+        """Regression test for entries fixed against Modbus V4.7 table 1.
+
+        These nine raw codes previously either carried text shifted from a
+        neighbouring row (2, 48, 49) or a placeholder "Unknown / description
+        unclear in source document" (52, 53, 136, 142, 143), or an unsourced
+        addition (141). Values are taken from Midea Modbus documentation
+        V4.7 (0052003044313 V.E), "Error code table 1", page 11.
+        """
+        self.header[-1] = MessageType.query
+        response = MessageC3Response(
+            bytes(self.header + self._build_body(error_code)),
+        )
+
+        assert response.error_code == error_code
+        assert response.error_code_description == expected_description
