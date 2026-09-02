@@ -19,6 +19,7 @@ from midealan.devices.c3.message import (
     MessageSetDisinfect,
     MessageSetECO,
     MessageSetSilent,
+    _parse_ascii_tail,
 )
 from midealan.message import ListTypes, MessageType
 
@@ -899,3 +900,185 @@ class TestC3UnitParaOutdoorTelemetryOffsets:
         response = self._build_response(values)
         assert hasattr(response, attribute)
         assert getattr(response, attribute) == expected
+
+
+# Real ASCII tail captured from a Hyundai HYHC-V30W/D2RN8 (Midea MHC-V30W/D2RN8,
+# device type 0xC3, protocol 3, Wi-Fi module 171H120F). In the capture the block
+# sits at bytes 160..191, preceded by a run of "-" padding and followed by NUL.
+CAPTURED_TAIL = b"0000C3310171H120F24114100123MNJ2"
+
+
+def _tail_block(serial: bytes = CAPTURED_TAIL, dashes: int = 24) -> bytes:
+    """Build a dash-padded, NUL-terminated ASCII tail block."""
+    return b"-" * dashes + serial + b"\x00" * 4
+
+
+class TestParseAsciiTail:
+    """Unit tests for the dash-padded ASCII tail scanner."""
+
+    def test_captured_tail_is_decoded(self) -> None:
+        """Test the real captured serial is returned verbatim."""
+        body = bytearray(32) + bytearray(_tail_block())
+        assert _parse_ascii_tail(body, 1) == CAPTURED_TAIL.decode()
+
+    def test_tail_is_located_by_dash_run_not_fixed_offset(self) -> None:
+        """Test the block is found wherever the dash run starts."""
+        near = bytearray(8) + bytearray(_tail_block())
+        far = bytearray(120) + bytearray(_tail_block())
+        assert _parse_ascii_tail(near, 1) == CAPTURED_TAIL.decode()
+        assert _parse_ascii_tail(far, 1) == CAPTURED_TAIL.decode()
+
+    def test_missing_dash_run_returns_none(self) -> None:
+        """Test a body without the padding run yields no identifier."""
+        assert _parse_ascii_tail(bytearray(200), 1) is None
+
+    def test_short_dash_run_is_not_treated_as_padding(self) -> None:
+        """Test fewer than 20 dashes does not trigger a match."""
+        body = bytearray(16) + bytearray(b"-" * 8 + CAPTURED_TAIL + b"\x00")
+        assert _parse_ascii_tail(body, 1) is None
+
+    def test_empty_tail_returns_none(self) -> None:
+        """Test padding immediately followed by NUL yields no identifier."""
+        body = bytearray(16) + bytearray(b"-" * 24 + b"\x00" * 8)
+        assert _parse_ascii_tail(body, 1) is None
+
+    def test_non_ascii_tail_returns_none(self) -> None:
+        """Test a tail with non-ASCII bytes is rejected instead of raising."""
+        body = bytearray(16) + bytearray(b"-" * 24 + b"\xff\xfe\xfd" + b"\x00")
+        assert _parse_ascii_tail(body, 1) is None
+
+    def test_unprintable_tail_returns_none(self) -> None:
+        """Test a control-character tail is rejected."""
+        body = bytearray(16) + bytearray(b"-" * 24 + b"AB\x07CD" + b"\x00")
+        assert _parse_ascii_tail(body, 1) is None
+
+    def test_scan_starts_at_data_offset(self) -> None:
+        """Test padding before data_offset is ignored."""
+        body = bytearray(b"-" * 24 + b"IGNORED" + b"\x00") + bytearray(_tail_block())
+        assert _parse_ascii_tail(body, 32) == CAPTURED_TAIL.decode()
+
+
+class TestC3UnitParaIdentification:
+    """Firmware versions and the Wi-Fi module serial in the X10 body.
+
+    The IDU / ODU software version bytes map to Modbus registers 130 and 1042
+    and were cross-checked against the wired HMI, which displays them as
+    "V<n>". Frames that stop before those offsets must keep parsing.
+    """
+
+    HEADER = bytearray(
+        [0xAA, 0x00, 0xC3, 0x00, 0x00, 0x00, 0x00, 0x00, 0x03, MessageType.query],
+    )
+
+    @staticmethod
+    def _build_response(
+        values: dict[int, int] | None = None,
+        *,
+        with_tail: bool = True,
+        size: int = 200,
+    ) -> MessageC3Response:
+        """Build an X10 query response, optionally carrying an ASCII tail."""
+        body = bytearray(size)
+        body[0] = ListTypes.X10
+        for index, value in (values or {}).items():
+            body[index] = value
+        if with_tail:
+            block = _tail_block()
+            body[120 : 120 + len(block)] = block
+        header = TestC3UnitParaIdentification.HEADER
+        return MessageC3Response(bytes(header + body))
+
+    def test_software_versions_are_read_from_their_offsets(self) -> None:
+        """Test IDU and ODU versions come from raw bytes 93 and 94."""
+        response = self._build_response({93: 0, 94: 12, 95: 30, 96: 0})
+        assert hasattr(response, "idu_software_version")
+        assert hasattr(response, "odu_software_version")
+        assert response.idu_software_version == 12
+        assert response.odu_software_version == 30
+
+    def test_software_versions_are_formatted_for_display(self) -> None:
+        """Test the string form matches the "V<n>" shown on the HMI."""
+        response = self._build_response({94: 12, 95: 30})
+        assert hasattr(response, "idu_software_version_str")
+        assert hasattr(response, "odu_software_version_str")
+        assert response.idu_software_version_str == "V12"
+        assert response.odu_software_version_str == "V30"
+
+    def test_short_body_leaves_versions_unset(self) -> None:
+        """Test a frame stopping before the version bytes still parses."""
+        body = bytearray(88)  # body type + 86 data bytes + CRC
+        body[0] = ListTypes.X10
+        response = MessageC3Response(bytes(self.HEADER + body))
+        assert hasattr(response, "idu_software_version")
+        assert response.idu_software_version is None
+        assert response.odu_software_version is None
+        assert response.idu_software_version_str is None
+        assert response.odu_software_version_str is None
+
+    def test_wifi_module_serial_is_exposed(self) -> None:
+        """Test the ASCII tail is surfaced as the Wi-Fi module serial."""
+        response = self._build_response()
+        assert hasattr(response, "wifi_module_serial")
+        assert response.wifi_module_serial == CAPTURED_TAIL.decode()
+
+    def test_wifi_module_serial_is_none_without_tail(self) -> None:
+        """Test a frame with no ASCII tail reports no serial."""
+        response = self._build_response(with_tail=False)
+        assert hasattr(response, "wifi_module_serial")
+        assert response.wifi_module_serial is None
+
+    def test_identification_does_not_disturb_existing_fields(self) -> None:
+        """Test the added parsing leaves earlier X10 offsets untouched."""
+        response = self._build_response({5: 9, 58: 2, 59: 44})
+        assert response.fg_capacity_need == 9
+        assert response.current_unit_capacity == 556
+
+
+class TestC3EnergyAsciiTail:
+    """The notify1 0x04 energy body also carries the ASCII tail."""
+
+    HEADER = bytearray(
+        [0xAA, 0x00, 0xC3, 0x00, 0x00, 0x00, 0x00, 0x00, 0x03, MessageType.notify1],
+    )
+
+    @staticmethod
+    def _build_response(*, with_tail: bool = True) -> MessageC3Response:
+        """Build a notify1 0x04 response, optionally carrying an ASCII tail."""
+        body = bytearray(200)
+        body[0] = ListTypes.X04
+        if with_tail:
+            block = _tail_block()
+            body[100 : 100 + len(block)] = block
+        return MessageC3Response(bytes(TestC3EnergyAsciiTail.HEADER + body))
+
+    def test_wifi_module_serial_is_exposed(self) -> None:
+        """Test the notify body surfaces the same identifier."""
+        response = self._build_response()
+        assert response.body_type == ListTypes.X04
+        assert hasattr(response, "wifi_module_serial")
+        assert response.wifi_module_serial == CAPTURED_TAIL.decode()
+
+    def test_wifi_module_serial_is_none_without_tail(self) -> None:
+        """Test a notify frame with no tail reports no serial."""
+        response = self._build_response(with_tail=False)
+        assert response.wifi_module_serial is None
+
+    def test_energy_counters_still_parse(self) -> None:
+        """Test the added parsing does not disturb the energy counters."""
+        header = bytearray(TestC3EnergyAsciiTail.HEADER)
+        body = bytearray(200)
+        body[0] = ListTypes.X04
+        for index, value in {
+            2: 0x01,
+            3: 0x02,
+            4: 0x03,
+            5: 0x04,
+            6: 0x0A,
+            7: 0x0B,
+            8: 0x0C,
+            9: 0x0D,
+        }.items():
+            body[index] = value
+        response = MessageC3Response(bytes(header + body))
+        assert response.total_energy_consumption == 0x01020304
+        assert response.total_produced_energy == 0x0A0B0C0D

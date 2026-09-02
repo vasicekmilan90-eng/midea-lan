@@ -12,6 +12,38 @@ from midealan.message import (
 )
 
 TEMP_NEG_VALUE = 127
+
+
+def _parse_ascii_tail(body: bytearray, data_offset: int) -> str | None:
+    """Extract the dash-padded, NUL-terminated ASCII tail identifier.
+
+    The WiFi module serial / model identifier is appended to C3 telemetry
+    frames as an ASCII block preceded by a run of dash ("-") padding bytes
+    and terminated with NUL bytes. Layout observed on captured frames:
+    bytes ~96..159 = dashes, ~160..191 = ASCII serial, then NUL. The exact
+    offsets vary between firmware revisions so the block is located by
+    scanning for the dash run rather than by fixed offset.
+    """
+    dash_idx = body.find(b"-" * 20, data_offset)
+    if dash_idx == -1:
+        return None
+    tail = body[dash_idx:]
+    start = 0
+    while start < len(tail) and tail[start : start + 1] == b"-":
+        start += 1
+    end = start
+    while end < len(tail) and tail[end] != 0:
+        end += 1
+    candidate = bytes(tail[start:end]).strip()
+    if not candidate:
+        return None
+    try:
+        decoded = candidate.decode("ascii")
+    except UnicodeDecodeError:
+        return None
+    return decoded if decoded.isprintable() else None
+
+
 # Outdoor fan speed is transmitted as RPM / 10.
 FAN_SPEED_FACTOR = 10
 
@@ -354,6 +386,12 @@ class C3EnergyBody(MessageBody):
         self.zone2_temp_set = float(body[data_offset + 11])
         self.t5s = body[data_offset + 12]
         self.tas = body[data_offset + 13]
+        # WiFi module serial / model identifier is appended after the
+        # main payload; see _parse_ascii_tail for the layout.
+        self.wifi_module_serial: str | None = _parse_ascii_tail(
+            body,
+            data_offset,
+        )
 
 
 class C3SilenceBody(MessageBody):
@@ -511,6 +549,32 @@ class C3UnitParaBody(MessageBody):
             + (self.read_byte(body, data_offset + 87) << 16)
             + (self.read_byte(body, data_offset + 88) << 8)
             + self.read_byte(body, data_offset + 89)
+        )
+        # ------------------------------------------------------------------
+        # IDU / ODU software versions (Modbus reg 130 / reg 1042 mapped
+        # into X10 telemetry frame). Verified against wired HMI:
+        #   raw byte offset 93 = IDU sw version (HMI shows "V<n>")
+        #   raw byte offset 94 = ODU sw version (HMI shows "V<n>")
+        # Guard: leave version bytes unset when the frame is short.
+        self.idu_software_version: int | None = None
+        self.odu_software_version: int | None = None
+        if len(body) > data_offset + 94:
+            self.idu_software_version = body[data_offset + 93]
+            self.odu_software_version = body[data_offset + 94]
+        self.idu_software_version_str = (
+            f"V{self.idu_software_version}"
+            if self.idu_software_version is not None
+            else None
+        )
+        self.odu_software_version_str = (
+            f"V{self.odu_software_version}"
+            if self.odu_software_version is not None
+            else None
+        )
+        # WiFi module serial: appended as ASCII after a run of "-" padding.
+        self.wifi_module_serial: str | None = _parse_ascii_tail(
+            body,
+            data_offset,
         )
 
 
