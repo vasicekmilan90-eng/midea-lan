@@ -899,3 +899,82 @@ class TestC3UnitParaOutdoorTelemetryOffsets:
         response = self._build_response(values)
         assert hasattr(response, attribute)
         assert getattr(response, attribute) == expected
+
+
+class TestC3ErrorCodeDescription:
+    """Test C3 error_code_description derived from C3_ERROR_CODE_TABLE."""
+
+    @pytest.fixture(autouse=True)
+    def _setup_header(self) -> None:
+        """Do setup header."""
+        self.header = bytearray(
+            [
+                0xAA,
+                0x00,
+                0xC3,
+                0x00,
+                0x00,
+                0x00,
+                0x00,
+                0x00,
+                0x01,
+                0x00,  # message type
+            ],
+        )
+
+    def _build_body(self, error_code: int) -> bytearray:
+        """Build a minimal X01 body with the given error_code byte."""
+        return bytearray(
+            [
+                ListTypes.X01,
+                0x0,  # BYTE 1
+                0x0,  # BYTE 2
+                0x0,  # BYTE 3
+                0x0,  # BYTE 4: Mode
+                0x0,  # BYTE 5: Mode Auto
+                0,  # BYTE 6: Zone1 Target Temp
+                0,  # BYTE 7: Zone2 Target Temp
+                0,  # BYTE 8: DHW Target Temp
+                0,  # BYTE 9: Room Target Temp * 2
+                0,  # BYTE 10
+                0,  # BYTE 11
+                0,  # BYTE 12
+                0,  # BYTE 13
+                0,  # BYTE 14
+                0,  # BYTE 15
+                0,  # BYTE 16
+                0,  # BYTE 17
+                0,  # BYTE 18
+                0,  # BYTE 19
+                0,  # BYTE 20
+                0,  # BYTE 21
+                0,  # BYTE 22: tank_actual_temperature
+                error_code,  # BYTE 23: error_code
+                0x0,  # BYTE 24; tbh_control
+                0x0,  # CRC
+            ],
+        )
+
+    def test_error_code_zero_is_no_error(self) -> None:
+        """error_code 0 maps to the 'No error' description."""
+        self.header[-1] = MessageType.query
+        response = MessageC3Response(bytes(self.header + self._build_body(0)))
+
+        assert response.error_code == 0
+        assert response.error_code_description == "No error"
+
+    def test_error_code_known_value_maps_to_table_entry(self) -> None:
+        """A known error_code maps to its display code and description."""
+        self.header[-1] = MessageType.query
+        response = MessageC3Response(bytes(self.header + self._build_body(9)))
+
+        assert response.error_code == 9
+        assert response.error_code_description == ("E8: Water flow failure")
+
+    def test_error_code_unknown_value_falls_back_to_raw(self) -> None:
+        """An error_code with no table entry reports the raw value."""
+        self.header[-1] = MessageType.query
+        response = MessageC3Response(bytes(self.header + self._build_body(200)))
+
+        assert response.error_code == 200
+        assert response.error_code_description == "Unknown code (raw=200)"
