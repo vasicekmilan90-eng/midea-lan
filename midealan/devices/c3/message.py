@@ -439,6 +439,31 @@ class C3UnitParaBody(MessageBody):
         self.odu_model = body[data_offset + 21]
         # self.unit_online_num  body[data_offset + 22]
         # self.current_code  body[data_offset + 23]
+        # LOAD_OUTPUT bitmap. Authoritative source: Midea Modbus doc
+        # V4.7, register 129 (Load output, 16-bit). Cross-checked
+        # against the wired HMI during a pump test.
+        #   BIT0 = electric heater IBH1     BIT4 = SV1
+        #   BIT1 = electric heater IBH2     BIT5 = SV2
+        #   BIT2 = electric heater TBH      BIT6 = external pump Pump_o
+        #   BIT3 = internal pump Pump_i     BIT7 = DHW pump Pump_d
+        # BIT8 (mixed water loop pump Pump_c, zone 2) lives in the
+        # adjacent byte; BIT9-BIT15 are reserved per the Modbus doc.
+        load_output = body[data_offset + 32]
+        load_output_hi = body[data_offset + 31]
+        self.ibh1_on = bool(load_output & 0x01)
+        self.ibh2_on = bool(load_output & 0x02)
+        self.load_output_tbh = bool(load_output & 0x04)
+        self.pump_i_running = bool(load_output & 0x08)
+        self.sv1_open = bool(load_output & 0x10)
+        self.sv2_open = bool(load_output & 0x20)
+        self.pump_o_running = bool(load_output & 0x40)
+        self.pump_d_running = bool(load_output & 0x80)
+        self.pump_c_running = bool(load_output_hi & 0x01)
+        # Diagnostic: bit-field-shaped byte whose register is not yet
+        # identified. Observed values 0/32/64/96 across 443 frames, with
+        # only bit5 and bit6 varying. Exposed raw so its bits can be
+        # correlated against scenario events before being named.
+        self.raw_b31 = body[data_offset + 30]
         self.temp_t1 = body[data_offset + 33]
         self.temp_tw2 = body[data_offset + 34]
         self.temp_t2 = body[data_offset + 35]

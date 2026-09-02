@@ -91,6 +91,16 @@ class DeviceAttributes(StrEnum):
     eco_mode = "eco_mode"
     tbh = "tbh"
     error_code = "error_code"
+    ibh1_on = "ibh1_on"
+    ibh2_on = "ibh2_on"
+    load_output_tbh = "load_output_tbh"
+    pump_i_running = "pump_i_running"
+    sv1_open = "sv1_open"
+    sv2_open = "sv2_open"
+    pump_o_running = "pump_o_running"
+    pump_d_running = "pump_d_running"
+    pump_c_running = "pump_c_running"
+    raw_b31 = "raw_b31"
 
 
 class MideaC3Device(MideaDevice):
@@ -174,6 +184,16 @@ class MideaC3Device(MideaDevice):
                 DeviceAttributes.fg_capacity_need: None,
                 DeviceAttributes.instant_power0: None,
                 DeviceAttributes.error_code: 0,
+                DeviceAttributes.ibh1_on: None,
+                DeviceAttributes.ibh2_on: None,
+                DeviceAttributes.load_output_tbh: None,
+                DeviceAttributes.pump_i_running: None,
+                DeviceAttributes.sv1_open: None,
+                DeviceAttributes.sv2_open: None,
+                DeviceAttributes.pump_o_running: None,
+                DeviceAttributes.pump_d_running: None,
+                DeviceAttributes.pump_c_running: None,
+                DeviceAttributes.raw_b31: None,
             },
         )
         self._default_temperature_step: float = 0.5

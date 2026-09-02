@@ -847,6 +847,122 @@ class TestC3UnitParaLuaOffsets:
         assert response.total_renew_power0 == 0
 
 
+class TestC3UnitParaLoadOutput:
+    """The LOAD_OUTPUT bitmap in the X10 body.
+
+    Authoritative source: Midea Modbus doc V4.7, register 129 (Load output).
+    The low byte sits at body[data_offset + 32] and carries BIT0..BIT7; BIT8
+    (mixed water loop pump, zone 2) is the low bit of the adjacent byte at
+    body[data_offset + 31]. Cross-checked against the wired HMI during a
+    pump test.
+    """
+
+    HEADER = bytearray(
+        [0xAA, 0x00, 0xC3, 0x00, 0x00, 0x00, 0x00, 0x00, 0x03, MessageType.query],
+    )
+
+    @staticmethod
+    def _build_response(values: dict[int, int]) -> MessageC3Response:
+        """Build an X10 query response with the given body bytes set."""
+        body = bytearray(96)
+        body[0] = ListTypes.X10
+        for index, value in values.items():
+            body[index] = value
+        return MessageC3Response(bytes(TestC3UnitParaLoadOutput.HEADER + body))
+
+    @pytest.mark.parametrize(
+        ("attribute", "mask"),
+        [
+            ("ibh1_on", 0x01),
+            ("ibh2_on", 0x02),
+            ("load_output_tbh", 0x04),
+            ("pump_i_running", 0x08),
+            ("sv1_open", 0x10),
+            ("sv2_open", 0x20),
+            ("pump_o_running", 0x40),
+            ("pump_d_running", 0x80),
+        ],
+    )
+    def test_each_low_byte_bit_maps_to_its_flag(
+        self,
+        attribute: str,
+        mask: int,
+    ) -> None:
+        """Test every documented low-byte bit drives exactly one flag."""
+        response = self._build_response({33: mask})
+
+        assert hasattr(response, attribute)
+        assert getattr(response, attribute) is True
+        others = [
+            "ibh1_on",
+            "ibh2_on",
+            "load_output_tbh",
+            "pump_i_running",
+            "sv1_open",
+            "sv2_open",
+            "pump_o_running",
+            "pump_d_running",
+        ]
+        for other in others:
+            if other != attribute:
+                assert getattr(response, other) is False
+
+    def test_all_flags_clear_when_byte_is_zero(self) -> None:
+        """Test an idle unit reports every load output off."""
+        response = self._build_response({33: 0x00})
+
+        assert response.ibh1_on is False
+        assert response.pump_i_running is False
+        assert response.sv1_open is False
+        assert response.pump_d_running is False
+        assert response.pump_c_running is False
+
+    def test_combined_flags_from_pump_test(self) -> None:
+        """Test the pump-test combination decodes as observed on the HMI."""
+        # Internal pump + SV1 running, everything else off.
+        response = self._build_response({33: 0x18})
+
+        assert response.pump_i_running is True
+        assert response.sv1_open is True
+        assert response.ibh1_on is False
+        assert response.sv2_open is False
+
+    def test_pump_c_comes_from_the_adjacent_byte(self) -> None:
+        """Test BIT8 is read from the byte before the low byte."""
+        response = self._build_response({32: 0x01, 33: 0x00})
+
+        assert response.pump_c_running is True
+        assert response.pump_i_running is False
+
+    def test_low_byte_does_not_leak_into_pump_c(self) -> None:
+        """Test a fully set low byte leaves BIT8 clear."""
+        response = self._build_response({33: 0xFF})
+
+        assert response.pump_d_running is True
+        assert response.pump_c_running is False
+
+    def test_reserved_high_bits_are_not_exposed(self) -> None:
+        """Test bits 9-15 do not affect any decoded flag."""
+        response = self._build_response({32: 0xFE, 33: 0x00})
+
+        assert response.pump_c_running is False
+        assert response.ibh1_on is False
+
+    def test_raw_b31_is_exposed_verbatim(self) -> None:
+        """Test the unmapped diagnostic byte is surfaced unchanged."""
+        response = self._build_response({31: 96})
+
+        assert hasattr(response, "raw_b31")
+        assert response.raw_b31 == 96
+
+    def test_bitmap_does_not_disturb_neighbouring_fields(self) -> None:
+        """Test the added reads leave the surrounding X10 offsets alone."""
+        response = self._build_response({31: 96, 32: 0x01, 33: 0xFF, 34: 21})
+
+        assert response.temp_t1 == 21
+        assert response.pump_d_running is True
+
+
 class TestC3UnitParaOutdoorTelemetryOffsets:
     """Pin the X10 body offsets for the outdoor-unit telemetry fields.
 
