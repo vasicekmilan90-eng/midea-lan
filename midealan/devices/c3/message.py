@@ -14,27 +14,37 @@ from midealan.message import (
 TEMP_NEG_VALUE = 127
 
 
-def _parse_ascii_tail(body: bytearray, data_offset: int) -> str | None:
-    """Extract the dash-padded, NUL-terminated ASCII tail identifier.
+# Serial-number blocks appended to the X10 telemetry frame. The lua splits
+# the tail into three fixed 32-byte ASCII blocks (1-indexed):
+#   iduSNCode = _bodyBytes[96..127]
+#   oduSNCode = _bodyBytes[128..159]
+#   hmiSNCode = _bodyBytes[160..191]
+# Only the HMI block is decoded; on the captured 171H120F the IDU and ODU
+# blocks are dash-filled. Unused positions are padded with "-", and a block
+# shorter than its full width is NUL-terminated.
+SN_BLOCK_LENGTH = 32
+HMI_SN_BLOCK_OFFSET = 159
 
-    The WiFi module serial / model identifier is appended to C3 telemetry
-    frames as an ASCII block preceded by a run of dash ("-") padding bytes
-    and terminated with NUL bytes. Layout observed on captured frames:
-    bytes ~96..159 = dashes, ~160..191 = ASCII serial, then NUL. The exact
-    offsets vary between firmware revisions so the block is located by
-    scanning for the dash run rather than by fixed offset.
+
+def _parse_sn_block(
+    body: bytearray,
+    data_offset: int,
+    block_offset: int,
+) -> str | None:
+    """Decode one fixed-width, dash-padded ASCII serial-number block.
+
+    Returns None when the frame stops before the block, when the block holds
+    only padding, or when its content is not printable ASCII.
     """
-    dash_idx = body.find(b"-" * 20, data_offset)
-    if dash_idx == -1:
+    start = data_offset + block_offset
+    end = start + SN_BLOCK_LENGTH
+    if len(body) < end:
         return None
-    tail = body[dash_idx:]
-    start = 0
-    while start < len(tail) and tail[start : start + 1] == b"-":
-        start += 1
-    end = start
-    while end < len(tail) and tail[end] != 0:
-        end += 1
-    candidate = bytes(tail[start:end]).strip()
+    block = bytes(body[start:end])
+    terminator = block.find(0)
+    if terminator != -1:
+        block = block[:terminator]
+    candidate = block.strip(b"-").strip()
     if not candidate:
         return None
     try:
@@ -386,12 +396,6 @@ class C3EnergyBody(MessageBody):
         self.zone2_temp_set = float(body[data_offset + 11])
         self.t5s = body[data_offset + 12]
         self.tas = body[data_offset + 13]
-        # WiFi module serial / model identifier is appended after the
-        # main payload; see _parse_ascii_tail for the layout.
-        self.wifi_module_serial: str | None = _parse_ascii_tail(
-            body,
-            data_offset,
-        )
 
 
 class C3SilenceBody(MessageBody):
@@ -571,10 +575,11 @@ class C3UnitParaBody(MessageBody):
             if self.odu_software_version is not None
             else None
         )
-        # WiFi module serial: appended as ASCII after a run of "-" padding.
-        self.wifi_module_serial: str | None = _parse_ascii_tail(
+        # HMI serial number, read at its fixed block offset.
+        self.hmi_sn_code: str | None = _parse_sn_block(
             body,
             data_offset,
+            HMI_SN_BLOCK_OFFSET,
         )
 
 

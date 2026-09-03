@@ -91,7 +91,7 @@ class DeviceAttributes(StrEnum):
     eco_mode = "eco_mode"
     tbh = "tbh"
     error_code = "error_code"
-    wifi_module_serial = "wifi_module_serial"
+    hmi_sn_code = "hmi_sn_code"
     idu_software_version_str = "idu_software_version_str"
     odu_software_version_str = "odu_software_version_str"
 
@@ -177,7 +177,7 @@ class MideaC3Device(MideaDevice):
                 DeviceAttributes.fg_capacity_need: None,
                 DeviceAttributes.instant_power0: None,
                 DeviceAttributes.error_code: 0,
-                DeviceAttributes.wifi_module_serial: None,
+                DeviceAttributes.hmi_sn_code: None,
                 DeviceAttributes.idu_software_version_str: None,
                 DeviceAttributes.odu_software_version_str: None,
             },
