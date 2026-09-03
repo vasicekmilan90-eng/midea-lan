@@ -376,13 +376,14 @@ class C3BasicBody(MessageBody):
         self.dhw_temp_min = float(body[data_offset + 20])
         self.tank_actual_temperature = float(body[data_offset + 21])
         self.error_code = body[data_offset + 22]
-        _code_info = C3_ERROR_CODE_TABLE.get(self.error_code)
         if self.error_code == 0:
             self.error_code_description = "No error"
-        elif _code_info:
-            self.error_code_description = f"{_code_info[0]}: {_code_info[1]}"
         else:
-            self.error_code_description = f"Unknown code (raw={self.error_code})"
+            _code_info = C3_ERROR_CODE_TABLE.get(self.error_code)
+            if _code_info:
+                self.error_code_description = f"{_code_info[0]}: {_code_info[1]}"
+            else:
+                self.error_code_description = f"Unknown code (raw={self.error_code})"
         self.tbh_control = body[data_offset + 23] & 0x80 > 0
         self.SysEnergyAnaEN = body[data_offset + 23] & 0x20 > 0
         self.HMIEnergyAnaSetEN = body[data_offset + 23] & 0x40 > 0
