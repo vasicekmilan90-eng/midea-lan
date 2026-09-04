@@ -42,7 +42,17 @@ def _parse_sn_block(
         return None
     block = bytes(body[start:end])
     terminator = block.find(0)
-    if terminator != -1:
+    if terminator == -1:
+        # No NUL in the block: only a fully populated 32-byte value is
+        # valid. A dash-padded block with no terminator is a partial or
+        # corrupt record, not a short serial that happens to fill the slot.
+        if block.strip(b"-") != block:
+            return None
+    else:
+        # Bytes after the terminator must be pure dash padding. Anything
+        # else (garbage, a second value) makes the record untrustworthy.
+        if block[terminator + 1 :].strip(b"-"):
+            return None
         block = block[:terminator]
     candidate = block.strip(b"-").strip()
     if not candidate:

@@ -978,6 +978,40 @@ class TestParseSnBlock:
         body = _body_with_sn(_sn_block())[:180]
         assert _parse_sn_block(body, 1, HMI_SN_OFFSET) is None
 
+    def test_dash_padded_block_without_terminator_returns_none(self) -> None:
+        """Test a padded block with no NUL terminator is rejected.
+
+        A short value followed by dash padding but never NUL-terminated is
+        not a valid record -- the terminator is what marks the value as
+        complete. Flagged by CodeRabbit on 89809e1.
+        """
+        block = b"SHORT1" + b"-" * (SN_BLOCK_LEN - 6)
+        body = _body_with_sn(block)
+        assert _parse_sn_block(body, 1, HMI_SN_OFFSET) is None
+
+    def test_bytes_after_terminator_returns_none(self) -> None:
+        """Test non-padding bytes after the NUL terminator are rejected.
+
+        Only dash padding may follow the terminator. A stray byte there
+        means the block cannot be trusted, even though the bytes before the
+        terminator look like a plausible serial. Flagged by CodeRabbit on
+        89809e1.
+        """
+        block = b"SHORT1\x00\x07" + b"-" * (SN_BLOCK_LEN - 8)
+        body = _body_with_sn(block)
+        assert _parse_sn_block(body, 1, HMI_SN_OFFSET) is None
+
+    def test_full_length_serial_without_terminator_is_decoded(self) -> None:
+        """Test a serial that exactly fills the block needs no terminator.
+
+        A 32-byte value with no dash padding and no NUL is not a partial
+        record -- it simply has nothing left to pad. It must still decode.
+        """
+        block = CAPTURED_HMI_SN
+        assert len(block) == SN_BLOCK_LEN
+        body = _body_with_sn(block)
+        assert _parse_sn_block(body, 1, HMI_SN_OFFSET) == CAPTURED_HMI_SN.decode()
+
     def test_non_ascii_block_returns_none(self) -> None:
         """Test non-ASCII bytes are rejected instead of raising."""
         body = _body_with_sn(b"\xff\xfe\xfd" + b"-" * (SN_BLOCK_LEN - 3))
