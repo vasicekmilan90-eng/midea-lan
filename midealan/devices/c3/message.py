@@ -559,7 +559,11 @@ class C3UnitParaBody(MessageBody):
         # into X10 telemetry frame). Verified against wired HMI:
         #   raw byte offset 93 = IDU sw version (HMI shows "V<n>")
         #   raw byte offset 94 = ODU sw version (HMI shows "V<n>")
-        # Guard: leave version bytes unset when the frame is short.
+        # Guard: leave version bytes unset when the frame is short. This
+        # reads body[...] directly rather than going through read_byte()
+        # like the rest of the method on purpose -- read_byte() defaults to
+        # 0, which would surface as "V0" and be indistinguishable from a
+        # unit actually reporting version 0. None says "not reported".
         self.idu_software_version: int | None = None
         self.odu_software_version: int | None = None
         if len(body) > data_offset + 94:

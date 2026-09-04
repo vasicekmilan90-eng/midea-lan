@@ -1021,7 +1021,11 @@ class TestC3UnitParaIdentification:
         return MessageC3Response(bytes(header + body))
 
     def test_software_versions_are_read_from_their_offsets(self) -> None:
-        """Test IDU and ODU versions come from raw bytes 93 and 94."""
+        """Test IDU and ODU versions come from body offsets 93 and 94.
+
+        The offsets are relative to data_offset, which is 1 for an X10
+        response, so the values below are written at body indices 94 and 95.
+        """
         response = self._build_response({93: 0, 94: 12, 95: 30, 96: 0})
         assert hasattr(response, "idu_software_version")
         assert hasattr(response, "odu_software_version")
