@@ -100,7 +100,20 @@ class DeviceAttributes(StrEnum):
     pump_o_running = "pump_o_running"
     pump_d_running = "pump_d_running"
     pump_c_running = "pump_c_running"
-    raw_b31 = "raw_b31"
+    sv3_open = "sv3_open"
+    crankcase_heater_on = "crankcase_heater_on"
+    pump_s_running = "pump_s_running"
+    alarm_on = "alarm_on"
+    run_valve_on = "run_valve_on"
+    aux_heat_on = "aux_heat_on"
+    defrost_valve_on = "defrost_valve_on"
+    fact_req_solar_on = "fact_req_solar_on"
+    fact_req_ther_cool_on = "fact_req_ther_cool_on"
+    cool_run = "cool_run"
+    heat_run = "heat_run"
+    dhw_run = "dhw_run"
+    fact_req_ther_heat_on = "fact_req_ther_heat_on"
+    edge_version_type = "edge_version_type"
 
 
 class MideaC3Device(MideaDevice):
@@ -193,7 +206,20 @@ class MideaC3Device(MideaDevice):
                 DeviceAttributes.pump_o_running: None,
                 DeviceAttributes.pump_d_running: None,
                 DeviceAttributes.pump_c_running: None,
-                DeviceAttributes.raw_b31: None,
+                DeviceAttributes.sv3_open: None,
+                DeviceAttributes.crankcase_heater_on: None,
+                DeviceAttributes.pump_s_running: None,
+                DeviceAttributes.alarm_on: None,
+                DeviceAttributes.run_valve_on: None,
+                DeviceAttributes.aux_heat_on: None,
+                DeviceAttributes.defrost_valve_on: None,
+                DeviceAttributes.fact_req_solar_on: None,
+                DeviceAttributes.fact_req_ther_cool_on: None,
+                DeviceAttributes.cool_run: None,
+                DeviceAttributes.heat_run: None,
+                DeviceAttributes.dhw_run: None,
+                DeviceAttributes.fact_req_ther_heat_on: None,
+                DeviceAttributes.edge_version_type: None,
             },
         )
         self._default_temperature_step: float = 0.5

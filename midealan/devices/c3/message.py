@@ -459,11 +459,29 @@ class C3UnitParaBody(MessageBody):
         self.pump_o_running = bool(load_output & 0x40)
         self.pump_d_running = bool(load_output & 0x80)
         self.pump_c_running = bool(load_output_hi & 0x01)
-        # Diagnostic: bit-field-shaped byte whose register is not yet
-        # identified. Observed values 0/32/64/96 across 443 frames, with
-        # only bit5 and bit6 varying. Exposed raw so its bits can be
-        # correlated against scenario events before being named.
-        self.raw_b31 = body[data_offset + 30]
+        # Remaining bits of register 129 (Modbus doc V4.7 BIT9-BIT15).
+        # BIT13 and BIT15 are documented as reserved, but the 171H120F lua
+        # reads them as fgRunValveOn and fgDefValveOn and they are live on
+        # real units, so both are decoded. BIT10 is "Crankcase heater" in
+        # the doc and fgHeat4ValveOn in the lua; the doc name is used.
+        self.sv3_open = bool(load_output_hi & 0x02)
+        self.crankcase_heater_on = bool(load_output_hi & 0x04)
+        self.pump_s_running = bool(load_output_hi & 0x08)
+        self.alarm_on = bool(load_output_hi & 0x10)
+        self.run_valve_on = bool(load_output_hi & 0x20)
+        self.aux_heat_on = bool(load_output_hi & 0x40)
+        self.defrost_valve_on = bool(load_output_hi & 0x80)
+        # Run-state byte. Not part of the Modbus register map; the bit
+        # names come from the 171H120F lua, which fills bits 1-7. Bit 0 is
+        # unnamed there and is left undecoded.
+        run_state = body[data_offset + 30]
+        self.fact_req_solar_on = bool(run_state & 0x02)
+        self.fact_req_ther_cool_on = bool(run_state & 0x04)
+        self.cool_run = bool(run_state & 0x08)
+        self.heat_run = bool(run_state & 0x10)
+        self.dhw_run = bool(run_state & 0x20)
+        self.fact_req_ther_heat_on = bool(run_state & 0x40)
+        self.edge_version_type = bool(run_state & 0x80)
         self.temp_t1 = body[data_offset + 33]
         self.temp_tw2 = body[data_offset + 34]
         self.temp_t2 = body[data_offset + 35]
