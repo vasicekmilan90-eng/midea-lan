@@ -590,10 +590,12 @@ class C3UnitParaUpBody(MessageBody):
         )
         self.unit_mode_run = body[data_offset + 59]
         # Compressor total run time in hours (u16 BE at lua bytes 57-58,
-        # i.e. body[data_offset + 56 .. + 57]). Verified against the
-        # wired HMI on a Galmet Prima 06 GT, which showed 2356 h for the
-        # same frame. The X10 query response does not carry this counter,
-        # so this notify is the only source for it.
+        # i.e. body[data_offset + 56 .. + 57]). The capture fixture used
+        # in the tests decodes to 2964 h. Cross-checked on a second unit,
+        # a Galmet Prima 06 GT, where the notify decoded 2365 h against
+        # 2365 h read from the wired HMI at the same time. The X10 query
+        # response does not carry this counter, so this notify is the
+        # only source for it.
         self.comp_total_run_time = body[data_offset + 56] * 256 + body[data_offset + 57]
 
 
