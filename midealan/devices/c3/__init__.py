@@ -94,6 +94,7 @@ class DeviceAttributes(StrEnum):
     hmi_sn_code = "hmi_sn_code"
     idu_software_version_str = "idu_software_version_str"
     odu_software_version_str = "odu_software_version_str"
+    error_code_description = "error_code_description"
 
 
 class MideaC3Device(MideaDevice):
@@ -180,6 +181,7 @@ class MideaC3Device(MideaDevice):
                 DeviceAttributes.hmi_sn_code: None,
                 DeviceAttributes.idu_software_version_str: None,
                 DeviceAttributes.odu_software_version_str: None,
+                DeviceAttributes.error_code_description: "No error",
             },
         )
         self._default_temperature_step: float = 0.5
