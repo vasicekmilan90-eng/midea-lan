@@ -114,6 +114,11 @@ class DeviceAttributes(StrEnum):
     dhw_run = "dhw_run"
     fact_req_ther_heat_on = "fact_req_ther_heat_on"
     edge_version_type = "edge_version_type"
+    comp_total_run_time = "comp_total_run_time"
+    hmi_sn_code = "hmi_sn_code"
+    idu_software_version_str = "idu_software_version_str"
+    odu_software_version_str = "odu_software_version_str"
+    error_code_description = "error_code_description"
 
 
 class MideaC3Device(MideaDevice):
@@ -220,6 +225,11 @@ class MideaC3Device(MideaDevice):
                 DeviceAttributes.dhw_run: None,
                 DeviceAttributes.fact_req_ther_heat_on: None,
                 DeviceAttributes.edge_version_type: None,
+                DeviceAttributes.comp_total_run_time: None,
+                DeviceAttributes.hmi_sn_code: None,
+                DeviceAttributes.idu_software_version_str: None,
+                DeviceAttributes.odu_software_version_str: None,
+                DeviceAttributes.error_code_description: "No error",
             },
         )
         self._default_temperature_step: float = 0.5
@@ -301,7 +311,7 @@ class MideaC3Device(MideaDevice):
                         self._attributes[DeviceAttributes.room_temp_min]
                     )
             if self._attributes[DeviceAttributes.zone1_power]:
-                if self._attributes[DeviceAttributes.zone_temp_type][zone]:
+                if self._attributes[DeviceAttributes.zone_temp_type][0]:
                     self._attributes[DeviceAttributes.zone1_water_temp_mode] = True
                     self._attributes[DeviceAttributes.zone1_room_temp_mode] = False
                 else:
@@ -311,7 +321,7 @@ class MideaC3Device(MideaDevice):
                 self._attributes[DeviceAttributes.zone1_water_temp_mode] = False
                 self._attributes[DeviceAttributes.zone1_room_temp_mode] = False
             if self._attributes[DeviceAttributes.zone2_power]:
-                if self._attributes[DeviceAttributes.zone_temp_type][zone]:
+                if self._attributes[DeviceAttributes.zone_temp_type][1]:
                     self._attributes[DeviceAttributes.zone2_water_temp_mode] = True
                     self._attributes[DeviceAttributes.zone2_room_temp_mode] = False
                 else:
